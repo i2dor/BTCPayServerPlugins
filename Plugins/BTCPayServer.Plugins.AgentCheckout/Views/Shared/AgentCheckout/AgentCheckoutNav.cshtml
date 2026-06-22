@@ -1,5 +1,3 @@
-@inject BTCPayServer.Abstractions.Contracts.IStoreRepository StoreRepository
-@inject BTCPayServer.Services.StoreRepository StoreRepo
 @{
     var storeId = this.ViewContext.RouteData.Values["storeId"]?.ToString()
         ?? Context.Request.Query["storeId"].ToString();

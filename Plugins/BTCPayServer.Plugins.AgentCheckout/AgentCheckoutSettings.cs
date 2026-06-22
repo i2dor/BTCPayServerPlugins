@@ -1,3 +1,4 @@
+#nullable enable
 namespace BTCPayServer.Plugins.AgentCheckout
 {
     public class AgentCheckoutSettings
