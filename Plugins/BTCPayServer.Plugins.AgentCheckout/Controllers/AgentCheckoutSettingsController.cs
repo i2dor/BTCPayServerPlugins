@@ -7,8 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace BTCPayServer.Plugins.AgentCheckout.Controllers
 {
+    [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    [Route("stores/{storeId}/plugins/agent-checkout")]
+    [Route("plugins/{storeId}/agent-checkout")]
     public class AgentCheckoutSettingsController : Controller
     {
         private readonly AgentCheckoutService _service;
@@ -22,7 +23,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         public async Task<IActionResult> UpdateSettings(string storeId)
         {
             var settings = await _service.GetSettings(storeId);
-            return View("AgentCheckout/UpdateSettings", settings);
+            return View(settings);
         }
 
         [HttpPost("")]
