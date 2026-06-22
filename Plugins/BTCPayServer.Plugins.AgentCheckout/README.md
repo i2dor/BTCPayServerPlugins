@@ -254,3 +254,15 @@ dotnet run --project ../../submodules/btcpayserver/BTCPayServer.PluginPacker -- 
 ```
 
 CI (GitHub Actions `pack-plugins.yml`) runs on every push to `Plugins/**` and uploads the `.btcpay` artifact automatically.
+
+---
+
+## Documentation
+
+[njump.me/npub17ph4attxued865ehp9j6dtfhpzj9az55wvur8dzq6t4y633qveuqvn9wf7](https://njump.me/npub17ph4attxued865ehp9j6dtfhpzj9az55wvur8dzq6t4y633qveuqvn9wf7)
+
+Source: [github.com/i2dor/BTCPayServerPlugins](https://github.com/i2dor/BTCPayServerPlugins/tree/ff-ref-i2dor/Plugins/BTCPayServer.Plugins.AgentCheckout)
+
+## Author
+
+[i2dor](https://github.com/i2dor)
