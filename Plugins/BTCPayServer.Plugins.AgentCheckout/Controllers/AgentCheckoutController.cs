@@ -33,11 +33,29 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             _agentCheckoutService = agentCheckoutService;
         }
 
+        [HttpGet("/stores/{storeId}/llms.txt")]
+        public async Task<IActionResult> GetStoreLlmsTxt(string storeId)
+        {
+            var settings = await _agentCheckoutService.GetSettings(storeId);
+            if (!settings.Enabled)
+                return NotFound();
+
+            var content = BuildLlmsTxt($"{Request.Scheme}://{Request.Host}");
+            if (!string.IsNullOrWhiteSpace(settings.LlmsTxtAppend))
+                content += "\n" + settings.LlmsTxtAppend.Trim() + "\n";
+
+            return Content(content, "text/plain; charset=utf-8");
+        }
+
         [HttpGet("/llms.txt")]
         public IActionResult GetLlmsTxt()
         {
-            var host = $"{Request.Scheme}://{Request.Host}";
-            var content = $@"# BTCPay Server Agent Checkout
+            return Content(BuildLlmsTxt($"{Request.Scheme}://{Request.Host}"), "text/plain; charset=utf-8");
+        }
+
+        private string BuildLlmsTxt(string host)
+        {
+            return $@"# BTCPay Server Agent Checkout
 
 > BTCPay Server lets LLM agents pay Bitcoin Lightning or on-chain invoices without authentication. Extract the invoiceId, request a quote, pay the returned URI, and poll for settlement.
 
@@ -99,7 +117,6 @@ If PENDING or PROCESSING, wait and check again.
 - [Create Quote]({host}/api/v1/agent/checkout/create-quote): Request a Lightning or Bitcoin quote for an existing invoice.
 - [Order Status]({host}/api/v1/agent/checkout/order-status): Check whether an invoice is paid, processing, or pending.
 ";
-            return Content(content, "text/plain; charset=utf-8");
         }
 
         [HttpPost("/api/v1/agent/checkout/create-quote")]
@@ -115,6 +132,10 @@ If PENDING or PROCESSING, wait and check again.
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
+
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
+                return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
 
             if (invoice.Status == InvoiceStatus.Expired || invoice.Status == InvoiceStatus.Invalid)
                 return BadRequest(new ErrorResponse("invoice-expired", "The invoice is expired or invalid."));
@@ -185,6 +206,10 @@ If PENDING or PROCESSING, wait and check again.
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
+
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
+                return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
 
             var status = invoice.Status switch
             {
