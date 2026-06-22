@@ -1,11 +1,15 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@inject IScopeProvider ScopeProvider
 @{
-    var storeId = this.ViewContext.RouteData.Values["storeId"]?.ToString()
-        ?? Context.Request.Query["storeId"].ToString();
+    var storeId = ScopeProvider.GetCurrentStoreId();
 }
 @if (!string.IsNullOrEmpty(storeId))
 {
-    <a asp-controller="AgentCheckoutSettings" asp-action="UpdateSettings" asp-route-storeId="@storeId"
-       class="nav-link" permission="@BTCPayServer.Client.Policies.CanModifyStoreSettings">
-        Agent Checkout
-    </a>
+    <li class="nav-item">
+        <a permission="@Policies.CanModifyStoreSettings" asp-controller="AgentCheckoutSettings" asp-action="UpdateSettings" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("AgentCheckout")" id="Nav-AgentCheckout">
+            <span>Agent Checkout</span>
+        </a>
+    </li>
 }
