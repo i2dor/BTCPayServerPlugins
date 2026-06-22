@@ -1,0 +1,13 @@
+@inject BTCPayServer.Abstractions.Contracts.IStoreRepository StoreRepository
+@inject BTCPayServer.Services.StoreRepository StoreRepo
+@{
+    var storeId = this.ViewContext.RouteData.Values["storeId"]?.ToString()
+        ?? Context.Request.Query["storeId"].ToString();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <a asp-controller="AgentCheckoutSettings" asp-action="UpdateSettings" asp-route-storeId="@storeId"
+       class="nav-link" permission="@BTCPayServer.Client.Policies.CanModifyStoreSettings">
+        Agent Checkout
+    </a>
+}
