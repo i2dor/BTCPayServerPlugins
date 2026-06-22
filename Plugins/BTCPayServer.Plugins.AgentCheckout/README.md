@@ -18,7 +18,7 @@ Exposes an LLM-readable `/llms.txt` and a public quote API so AI agents can pay 
 3. Restart BTCPay Server when prompted
 4. Go to **Store Settings -> Integrations -> Agent Checkout** to configure each store
 
-**Requires:** BTCPay Server >= 2.3.3
+**Requires:** BTCPay Server >= 2.3.7
 
 ---
 
