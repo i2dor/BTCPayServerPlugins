@@ -1,0 +1,57 @@
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.AgentCheckout
+@model BTCPayServer.Plugins.AgentCheckout.AgentCheckoutSettings
+@{
+    ViewData.SetActivePage("AgentCheckout", "Agent Checkout", "AgentCheckout");
+}
+
+<div class="sticky-header-setup"></div>
+<div class="d-flex justify-content-between align-items-center sticky-header">
+    <h2 class="mb-0">Agent Checkout</h2>
+    <button type="submit" form="agent-checkout-settings" class="btn btn-primary">Save</button>
+</div>
+
+<form method="post" id="agent-checkout-settings">
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+
+            <div class="form-group">
+                <div class="d-flex align-items-center">
+                    <input asp-for="Enabled" type="checkbox" class="btcpay-toggle me-3" />
+                    <label asp-for="Enabled" class="form-check-label">Enable Agent Checkout</label>
+                </div>
+                <p class="text-muted mt-1 mb-0">Exposes <code>/llms.txt</code> and the public quote API for LLM agents.</p>
+            </div>
+
+            <div class="form-group">
+                <div class="d-flex align-items-center">
+                    <input asp-for="AllowLightning" type="checkbox" class="btcpay-toggle me-3" />
+                    <label asp-for="AllowLightning" class="form-check-label">Allow Lightning payments</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <div class="d-flex align-items-center">
+                    <input asp-for="AllowOnChain" type="checkbox" class="btcpay-toggle me-3" />
+                    <label asp-for="AllowOnChain" class="form-check-label">Allow on-chain BTC payments</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="RateLimitPerMinute" class="form-label">Rate limit (requests / minute per IP)</label>
+                <input asp-for="RateLimitPerMinute" type="number" class="form-control" min="1" max="300" style="max-width:120px" />
+                <span asp-validation-for="RateLimitPerMinute" class="text-danger"></span>
+                <p class="text-muted mt-1 mb-0">Applies to the <code>/api/v1/agent/checkout/*</code> endpoints.</p>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="LlmsTxtAppend" class="form-label">Custom <code>llms.txt</code> content (appended)</label>
+                <textarea asp-for="LlmsTxtAppend" class="form-control" rows="6"
+                          placeholder="## Store notes&#10;&#10;Additional instructions for LLM agents visiting this store."></textarea>
+                <p class="text-muted mt-1 mb-0">Raw Markdown appended after the standard API instructions in <code>/stores/{storeId}/llms.txt</code>.</p>
+            </div>
+
+        </div>
+    </div>
+</form>

@@ -23,7 +23,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         public async Task<IActionResult> UpdateSettings(string storeId)
         {
             var settings = await _service.GetSettings(storeId);
-            return View("AgentCheckout/UpdateSettings", settings);
+            return View(settings);
         }
 
         [HttpPost("")]
