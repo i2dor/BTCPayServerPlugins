@@ -17,6 +17,7 @@ jobs:
         plugin:
           - BTCPayServer.Plugins.FixedFloat
           - BTCPayServer.Plugins.SideShift
+          - BTCPayServer.Plugins.AgentCheckout
 
     steps:
       - name: Checkout (with submodules)
@@ -25,10 +26,10 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup .NET 8
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Publish ${{ matrix.plugin }}
         working-directory: Plugins/${{ matrix.plugin }}
