@@ -1,0 +1,57 @@
+name: Pack BTCPay plugins
+
+on:
+  push:
+    paths:
+      - 'Plugins/**'
+      - '.github/workflows/pack-plugins.yml'
+  workflow_dispatch:
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - BTCPayServer.Plugins.FixedFloat
+          - BTCPayServer.Plugins.SideShift
+          - BTCPayServer.Plugins.AgentCheckout
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish ${{ matrix.plugin }}
+        working-directory: Plugins/${{ matrix.plugin }}
+        run: dotnet publish -c Altcoins-Release -o bin/publish/${{ matrix.plugin }}
+
+      - name: Pack ${{ matrix.plugin }} into .btcpay
+        working-directory: Plugins/${{ matrix.plugin }}
+        run: |
+          dotnet run --project ../../submodules/btcpayserver/BTCPayServer.PluginPacker -- \
+            bin/publish/${{ matrix.plugin }} \
+            ${{ matrix.plugin }} \
+            ../packed
+
+      - name: Show packed output
+        run: |
+          echo "=== Packed for ${{ matrix.plugin }} ==="
+          find Plugins/packed -type f -name "*.btcpay" -exec ls -lh {} \;
+
+      - name: Upload .btcpay artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.plugin }}-btcpay
+          path: Plugins/packed/**/*.btcpay
+          if-no-files-found: error
+          retention-days: 30

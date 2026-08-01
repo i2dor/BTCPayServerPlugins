@@ -24,7 +24,7 @@ Vue.component("fixed-float", {
             return (
                 "https://widget.fixedfloat.com/?" +
                 `to=${settleMethodId}` +
-                "&lockReceive=true&ref=fkbyt39c" +
+                "&lockReceive=true&ref=84b699yb" +
                 `&address=${this.toCurrencyAddress}` +
                 (topup
                     ? ""
