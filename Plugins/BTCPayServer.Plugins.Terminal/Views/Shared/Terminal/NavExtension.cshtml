@@ -1,0 +1,35 @@
+@using BTCPayServer.Client
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Services.Apps
+@using BTCPayServer
+@using BTCPayServer.Plugins.Terminal
+@inject AppService AppService;
+@model BTCPayServer.Components.MainNav.MainNavViewModel
+@{
+    var store = Context.GetStoreDataOrNull();
+}
+
+@if (store != null)
+{
+    var appType = AppService.GetAppType(TerminalApp.AppType)!;
+    // One Terminal per store: if one already exists, the nav opens it directly;
+    // otherwise it offers the one-time create. This is what keeps a store from
+    // accumulating multiple Terminal apps.
+    var terminalApp = Model.Apps.FirstOrDefault(app => app.AppType == appType.Type);
+    <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
+        @if (terminalApp != null)
+        {
+            <a layout-menu-item="@nameof(TerminalPlugin)-@terminalApp.Id" asp-area="" asp-controller="UITerminal" asp-action="UpdateSettings" asp-route-appId="@terminalApp.Id" id="StoreNav-Terminal">
+                <vc:icon symbol="pos-cart" />
+                <span>@appType.Description</span>
+            </a>
+        }
+        else
+        {
+            <a layout-menu-item="CreateApp-@appType.Type" asp-area="" asp-controller="UITerminal" asp-action="CreateOrOpen" asp-route-storeId="@store.Id" id="@($"StoreNav-Create{appType.Type}")">
+                <vc:icon symbol="pos-cart" />
+                <span>@appType.Description</span>
+            </a>
+        }
+    </li>
+}

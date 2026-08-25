@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer.DerivationStrategy;
+using NBXplorer.Models;
 
 namespace BTCPayServer.Plugins.Electrum.Services;
 
@@ -34,6 +35,7 @@ public class ElectrumListener : IHostedService
     private readonly PaymentService _paymentService;
     private readonly PaymentMethodHandlerDictionary _handlers;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly BackendCoordinator _coordinator;
     private readonly ILogger<ElectrumListener> _logger;
     private CancellationTokenSource _cts;
     private Task _listenTask;
@@ -48,6 +50,7 @@ public class ElectrumListener : IHostedService
         PaymentService paymentService,
         PaymentMethodHandlerDictionary handlers,
         BTCPayNetworkProvider networkProvider,
+        BackendCoordinator coordinator,
         ILogger<ElectrumListener> logger)
     {
         _electrumClient = electrumClient;
@@ -59,6 +62,7 @@ public class ElectrumListener : IHostedService
         _paymentService = paymentService;
         _handlers = handlers;
         _networkProvider = networkProvider;
+        _coordinator = coordinator;
         _logger = logger;
     }
 
@@ -195,6 +199,10 @@ public class ElectrumListener : IHostedService
         ElectrumWalletTracker.NewTransactionInfo txInfo,
         BTCPayNetwork network, BTCPayWallet wallet, PaymentMethodId pmi)
     {
+        var walletId = txInfo.DerivationStrategy.ToString();
+        if (!EventGate.ShouldElectrumPublish(_coordinator.GetActiveBackend(walletId)))
+            return; // NBX-active: NBXplorerListener owns this wallet's events
+
         foreach (var output in txInfo.Outputs)
         {
             var invoice = await _invoiceRepository.GetInvoiceFromAddress(pmi, output.Address);
@@ -236,6 +244,47 @@ public class ElectrumListener : IHostedService
                 });
             }
         }
+
+        // Republish the NBXplorer-shaped NewOnChainTransactionEvent so any
+        // plugin that subscribes to it (boarding-address watchers, custom
+        // payout monitors, OnChainRateTrackerHostedService, etc.) keeps
+        // working when Electrum is the explorer backend. Without this, the
+        // NBXplorerListener removal in ElectrumPlugin.Execute leaves those
+        // subscribers silent — addresses receive tx's that the plugin never
+        // sees. Mirrors what NBXplorerListener publishes on every wallet-
+        // touching wire event.
+        if (txInfo.Transaction is null)
+            return;
+
+        var nbxEvent = new NewTransactionEvent
+        {
+            CryptoCode = network.CryptoCode,
+            DerivationStrategy = txInfo.DerivationStrategy,
+            TrackedSource = new DerivationSchemeTrackedSource(txInfo.DerivationStrategy),
+            TransactionData = new TransactionResult
+            {
+                Transaction = txInfo.Transaction,
+                TransactionHash = txInfo.Transaction.GetHash(),
+                Confirmations = txInfo.Confirmations,
+                Timestamp = txInfo.SeenAt,
+            },
+            // BlockId left null: Electrum's per-tx notification stream
+            // doesn't include the containing block hash. Consumers that
+            // care about "confirmed yet" should check Confirmations > 0.
+            Outputs = txInfo.Outputs.Select(o => new MatchedOutput
+            {
+                Index = o.Index,
+                Value = o.Value,
+                KeyPath = string.IsNullOrEmpty(o.KeyPath) ? null : new KeyPath(o.KeyPath),
+                KeyIndex = o.KeyIndex,
+                ScriptPubKey = txInfo.Transaction.Outputs[o.Index].ScriptPubKey,
+            }).ToList(),
+        };
+        _eventAggregator.Publish(new NewOnChainTransactionEvent
+        {
+            PaymentMethodId = pmi,
+            NewTransactionEvent = nbxEvent,
+        });
     }
 
     private async Task FindPaymentsViaPolling(CancellationToken ct)
@@ -262,6 +311,10 @@ public class ElectrumListener : IHostedService
 
                 var promptDetails = handler.ParsePaymentPromptDetails(prompt.Details);
                 if (promptDetails?.AccountDerivation == null) continue;
+
+                var walletId = promptDetails.AccountDerivation.ToString();
+                if (!EventGate.ShouldElectrumPublish(_coordinator.GetActiveBackend(walletId)))
+                    continue; // NBX-active: NBXplorerListener owns this wallet's events
 
                 var strategy = promptDetails.AccountDerivation;
                 var coins = await wallet.GetUnspentCoins(strategy, cancellation: ct);

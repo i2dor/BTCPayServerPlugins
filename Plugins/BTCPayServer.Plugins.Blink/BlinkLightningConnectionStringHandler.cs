@@ -20,6 +20,25 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         _loggerFactory = loggerFactory;
     }
 
+    /// <summary>Returns the default Blink GraphQL server for the given network when none is specified.</summary>
+    internal static string DefaultServer(Network network)
+        => network.Name switch
+        {
+            nameof(Network.TestNet) => "https://api.staging.galoy.io/graphql",
+            nameof(Network.RegTest) => "http://localhost:4455/graphql",
+            _ => "https://api.blink.sv/graphql"
+        };
+
+    /// <summary>A blink connection string denotes a non-custodial (receive-only) account when it has
+    /// no <c>api-key</c> and carries an <c>ln-address</c> (or its <c>username</c> alias).</summary>
+    internal static bool IsLnAddressConnectionString(
+        System.Collections.Generic.Dictionary<string, string> kv, out string? lnAddress)
+    {
+        lnAddress = null;
+        if (kv.ContainsKey("api-key"))
+            return false;
+        return kv.TryGetValue("ln-address", out lnAddress) || kv.TryGetValue("username", out lnAddress);
+    }
 
     public ILightningClient? Create(string connectionString, Network network, out string? error)
     {
@@ -30,14 +49,17 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
             return null;
         }
 
+        // Non-custodial (Spark) accounts: identified by an "ln-address" (or bare "username") key
+        // and the absence of an "api-key". These have no GraphQL wallet-id and can only receive,
+        // via LNURL-pay + LUD-21 verify brokered by blink-lnurl-server.
+        if (IsLnAddressConnectionString(kv, out var lnAddress))
+        {
+            return CreateLnAddressClient(lnAddress, kv, network, out error);
+        }
+
         if (!kv.TryGetValue("server", out var server))
         {
-            server = network.Name switch
-            {
-                nameof(Network.TestNet) => "https://api.staging.galoy.io/graphql",
-                nameof(Network.RegTest) => "http://localhost:4455/graphql",
-                _ => "https://api.blink.sv/graphql"
-            };
+            server = DefaultServer(network);
             // error = $"The key 'server' is mandatory for blink connection strings";
             // return null;
         }
@@ -98,5 +120,50 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
             }
         }
         return new BlinkLightningClient(apiKey, uri, walletId, currency, network, client, _loggerFactory.CreateLogger(nameof(BlinkLightningClient)));
+    }
+
+    private ILightningClient? CreateLnAddressClient(string? lnAddress,
+        System.Collections.Generic.Dictionary<string, string> kv, Network network, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(lnAddress))
+        {
+            error = "The key 'ln-address' must be a Blink lightning address (e.g. user@blink.sv)";
+            return null;
+        }
+
+        // Allow a bare username; default the domain to blink.sv.
+        if (!lnAddress.Contains('@'))
+            lnAddress = $"{lnAddress}@blink.sv";
+
+        var atParts = lnAddress.Split('@');
+        if (atParts.Length != 2 || string.IsNullOrWhiteSpace(atParts[0]) || string.IsNullOrWhiteSpace(atParts[1]))
+        {
+            error = $"The key 'ln-address' is not a valid lightning address ('{lnAddress}')";
+            return null;
+        }
+
+        // USDB (non-custodial Dollar balance) is requested via currency=USD. Not yet live server-side;
+        // passed through so it works automatically once Blink ships Spark USD receive support.
+        bool usd = false;
+        if (kv.TryGetValue("currency", out var currencyStr))
+        {
+            try
+            {
+                usd = BlinkLightningClient.ParseBlinkCurrency(currencyStr) == BlinkCurrency.USD;
+            }
+            catch (FormatException e)
+            {
+                error = e.Message;
+                return null;
+            }
+        }
+
+        error = null;
+        var client = _httpClientFactory.CreateClient();
+        // Bound each LNURL/verify request rather than inheriting the default 100s HttpClient timeout,
+        // so a degraded blink-lnurl-server cannot tie up a connection per poll for that long.
+        client.Timeout = TimeSpan.FromSeconds(30);
+        return new BlinkLnAddressLightningClient(lnAddress, usd, network, client,
+            _loggerFactory.CreateLogger(nameof(BlinkLnAddressLightningClient)));
     }
 }

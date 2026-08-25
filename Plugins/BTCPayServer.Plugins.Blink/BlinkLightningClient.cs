@@ -68,6 +68,65 @@ query InvoiceByPaymentHash($walletId: WalletId!) {
             _ => throw new FormatException("Invalid Blink Wallet Currency (Only BTC and USD are supported)")
         };
 
+    /// <summary>Maps a Blink invoice <c>paymentStatus</c> to a BTCPay <see cref="LightningInvoiceStatus"/>.
+    /// Unknown or null values degrade to <see cref="LightningInvoiceStatus.Unpaid"/> so an unexpected
+    /// status from Blink cannot throw and abort payment processing.</summary>
+    internal static LightningInvoiceStatus MapInvoiceStatus(string? paymentStatus)
+        => paymentStatus switch
+        {
+            "EXPIRED" => LightningInvoiceStatus.Expired,
+            "PAID" => LightningInvoiceStatus.Paid,
+            "PENDING" => LightningInvoiceStatus.Unpaid,
+            _ => LightningInvoiceStatus.Unpaid
+        };
+
+    /// <summary>Maps a Blink transaction <c>status</c> to a BTCPay <see cref="LightningPaymentStatus"/>.</summary>
+    internal static LightningPaymentStatus MapPaymentStatus(string? status)
+        => status switch
+        {
+            "FAILURE" => LightningPaymentStatus.Failed,
+            "PENDING" => LightningPaymentStatus.Pending,
+            "SUCCESS" => LightningPaymentStatus.Complete,
+            _ => LightningPaymentStatus.Unknown
+        };
+
+    /// <summary>Maps a Blink <c>lnInvoicePaymentSend.status</c> to a BTCPay <see cref="PayResult"/>.
+    /// Unknown or null values degrade to <see cref="PayResult.Unknown"/>.</summary>
+    internal static PayResult MapPayResult(string? status)
+        => status switch
+        {
+            "ALREADY_PAID" => PayResult.Ok,
+            "SUCCESS" => PayResult.Ok,
+            "FAILURE" => PayResult.Error,
+            "PENDING" => PayResult.Unknown,
+            _ => PayResult.Unknown
+        };
+
+    /// <summary>Maps a Blink payment-send <c>status</c> to a BTCPay <see cref="LightningPaymentStatus"/>
+    /// for the <see cref="PayDetails"/>. Unknown or null values degrade to
+    /// <see cref="LightningPaymentStatus.Unknown"/>.</summary>
+    internal static LightningPaymentStatus MapPayDetailStatus(string? status)
+        => status switch
+        {
+            "ALREADY_PAID" => LightningPaymentStatus.Complete,
+            "SUCCESS" => LightningPaymentStatus.Complete,
+            "FAILURE" => LightningPaymentStatus.Failed,
+            "PENDING" => LightningPaymentStatus.Pending,
+            _ => LightningPaymentStatus.Unknown
+        };
+
+    /// <summary>Maps a Blink <c>globals.network</c> string to an <see cref="NBitcoin.Network"/>.
+    /// Blink signet maps to TestNet (BTCPay has no distinct signet network here).</summary>
+    internal static Network MapNetwork(string network)
+        => network switch
+        {
+            "mainnet" => Network.Main,
+            "testnet" => Network.TestNet,
+            "signet" => Network.TestNet,
+            "regtest" => Network.RegTest,
+            _ => throw new ArgumentOutOfRangeException(nameof(network), network, "Unknown Blink network")
+        };
+
     record WalletInfo(BlinkCurrency WalletCurrency, string WalletId);
 
     private WalletInfo? _WalletInfo;
@@ -187,18 +246,16 @@ query InvoiceByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!) {
     public LightningInvoice? ToInvoice(JObject invoice)
     {
         var bolt11 = BOLT11PaymentRequest.Parse(invoice["paymentRequest"].Value<string>(), _network);
+        // Map the status once (null-safe) and reuse it for both Status and PaidAt, so a missing
+        // paymentStatus cannot abort conversion via an unsafe dereference.
+        var status = MapInvoiceStatus(invoice["paymentStatus"]?.Value<string>());
         return new LightningInvoice()
         {
             Id = invoice["paymentHash"].Value<string>(),
             Amount = invoice["satoshis"] is null? bolt11.MinimumAmount:  LightMoney.Satoshis(invoice["satoshis"].Value<long>()),
                 Preimage =  invoice["paymentSecret"].Value<string>(),
-            PaidAt = (invoice["paymentStatus"].Value<string>()) ==  "PAID"? DateTimeOffset.UtcNow : null,
-            Status =  (invoice["paymentStatus"].Value<string>()) switch
-            {
-                "EXPIRED" => LightningInvoiceStatus.Expired,
-                "PAID" => LightningInvoiceStatus.Paid,
-                "PENDING" => LightningInvoiceStatus.Unpaid
-            },
+            PaidAt = status == LightningInvoiceStatus.Paid ? DateTimeOffset.UtcNow : null,
+            Status =  status,
             BOLT11 =  invoice["paymentRequest"].Value<string>(),
             PaymentHash = invoice["paymentHash"].Value<string>(),
             ExpiresAt = bolt11.ExpiryDate
@@ -351,13 +408,7 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
         return new LightningPayment()
         {
             Amount = bolt11.MinimumAmount,
-            Status = transaction["status"].ToString() switch
-            {
-                "FAILURE" => LightningPaymentStatus.Failed,
-                "PENDING" => LightningPaymentStatus.Pending,
-                "SUCCESS" => LightningPaymentStatus.Complete,
-                _ => LightningPaymentStatus.Unknown
-            },
+            Status = MapPaymentStatus(transaction["status"]?.ToString()),
             BOLT11 = (string)initiationVia["paymentRequest"],
             Id = (string)initiationVia["paymentHash"],
             PaymentHash = (string)initiationVia["paymentHash"],
@@ -621,14 +672,7 @@ query GetNetworkAndDefaultWallet {
 
         var defaultWalletId = (string) response.Data.me.defaultAccount.defaultWallet.id;
         var defaultWalletCurrency = (string) response.Data.me.defaultAccount.defaultWallet.currency;
-        var network = response.Data.globals.network.ToString() switch
-        {
-            "mainnet" => Network.Main,
-            "testnet" => Network.TestNet,
-            "signet" => Network.TestNet,
-            "regtest" => Network.RegTest,
-            _ => throw new ArgumentOutOfRangeException()
-        };
+        var network = MapNetwork(response.Data.globals.network.ToString());
         return (network, defaultWalletId, ParseBlinkCurrency(defaultWalletCurrency));
     }
 
@@ -680,17 +724,99 @@ query GetWallet($walletId: WalletId!) {
         throw new NotSupportedException();
     }
 
-    public async Task<PayResponse> Pay(PayInvoiceParams payParams,
+    public Task<PayResponse> Pay(PayInvoiceParams payParams,
         CancellationToken cancellation = new CancellationToken())
     {
-        return await Pay(null, new PayInvoiceParams(), cancellation);
+        // This overload carries no bolt11 to pay. Blink's payment mutation requires a
+        // payment request, so there is nothing we can send here. Fail explicitly instead
+        // of forwarding a null bolt11 (which would throw an opaque NullReferenceException
+        // when parsing the invoice).
+        throw new NotSupportedException(
+            "Paying without a BOLT11 payment request is not supported by the Blink client.");
     }
 
     private static TimeSpan PayTimeout = TimeSpan.FromMinutes(1.0);
+
+    /// <summary>
+    /// Whether a fee probe should be attempted for the given invoice. Only amount-carrying
+    /// invoices can be probed here: a probe caches the route on the Blink backend so the
+    /// payment settles at the exact fee instead of Blink's max fee reserve. Zero-amount
+    /// invoices carry no amount to probe with (Pay receives no explicit amount), so they are
+    /// paid as-is.
+    /// </summary>
+    internal static bool ShouldProbeFee(BOLT11PaymentRequest bolt11)
+        => bolt11.MinimumAmount > LightMoney.Zero;
+
+    /// <summary>
+    /// Probes the route for the fee of an amount-carrying lightning invoice.
+    /// Probing caches the route on the Blink backend so the subsequent payment
+    /// settles with the exact fee instead of Blink's max fee reserve.
+    /// This is best-effort: any failure is logged and swallowed so the payment
+    /// still proceeds (Blink will then fall back to its max fee reserve).
+    /// </summary>
+    private async Task ProbeFee(string bolt11, CancellationToken cancellation)
+    {
+        var request = new GraphQLRequest
+        {
+            Query = @"
+mutation LnInvoiceFeeProbe($input: LnInvoiceFeeProbeInput!) {
+  lnInvoiceFeeProbe(input: $input) {
+    amount
+    errors {
+      message
+    }
+  }
+}",
+            OperationName = "LnInvoiceFeeProbe",
+            Variables = new
+            {
+                input = new
+                {
+                    walletId = await GetWalletId(),
+                    paymentRequest = bolt11,
+                }
+            }
+        };
+
+        try
+        {
+            var response = (JObject)(await _client.SendQueryAsync<dynamic>(request, cancellation))
+                .Data.lnInvoiceFeeProbe;
+            if (response.TryGetValue("errors", out var error)
+                && error is JArray { Count: > 0 } arr)
+            {
+                Logger?.LogWarning(
+                    "Blink fee probe failed ('{Error}'), paying without probe.",
+                    arr[0]["message"]?.Value<string>());
+            }
+            else
+            {
+                // The probe caches the route on the Blink backend so the payment
+                // settles at this exact fee instead of Blink's max fee reserve. This
+                // is the real route fee: some destinations (e.g. swap/Spark providers)
+                // legitimately cost more to reach, which is correct, not an overcharge.
+                Logger?.LogDebug(
+                    "Blink fee probe succeeded: route fee {Amount} sat.",
+                    response["amount"]?.Value<long?>());
+            }
+        }
+        catch (Exception exc)
+        {
+            Logger?.LogWarning(exc, "Blink fee probe errored, paying without probe.");
+        }
+    }
+
     public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams,
         CancellationToken cancellation = default)
     {
-        
+        var bolt11Parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
+
+        // Probe amount invoices first so Blink caches the route and settles at the
+        // exact fee instead of its max fee reserve. Zero-amount invoices carry no
+        // amount to probe with here, so they are paid as-is (best-effort, no reject).
+        if (ShouldProbeFee(bolt11Parsed))
+            await ProbeFee(bolt11, cancellation);
+
         var request = new GraphQLRequest
         {
             Query = @"
@@ -733,7 +859,6 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
                 }
             }
         };
-        var bolt11Parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
 
         using var inner = new CancellationTokenSource(payParams?.SendTimeout ?? PayTimeout);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation,inner.Token);
@@ -741,15 +866,7 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
         var response =(JObject) (await  _client.SendQueryAsync<dynamic>(request,  cts.Token)).Data.lnInvoicePaymentSend;
         
         var result = new PayResponse();
-        result.Result = response["status"].Value<string>() switch
-        {
-            "ALREADY_PAID" => PayResult.Ok,
-            "FAILURE" => PayResult.Error,
-            "PENDING"=> PayResult.Unknown,
-            "SUCCESS" => PayResult.Ok,
-            null => PayResult.Unknown,
-            _ => throw new ArgumentOutOfRangeException()
-        };
+        result.Result = MapPayResult(response["status"]?.Value<string>());
         bool authError = false;
         response.TryGetValue("errors", out var error);
         if (result.Result == PayResult.Unknown && error is not null)
@@ -777,15 +894,7 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
             result.Details = new PayDetails()
             {
                 PaymentHash = bolt11Parsed.PaymentHash ?? new uint256(response["transaction"]["initiationVia"]["paymentHash"].Value<string>()),
-                Status = response["status"].Value<string>() switch
-                {
-                    "ALREADY_PAID"  => LightningPaymentStatus.Complete,
-                    "FAILURE" => LightningPaymentStatus.Failed,
-                    "PENDING" => LightningPaymentStatus.Pending,
-                    "SUCCESS" => LightningPaymentStatus.Complete,
-                    string status => throw new ArgumentOutOfRangeException($"Unknown status received by blink ({status})"),
-                    _ => LightningPaymentStatus.Unknown,
-                },
+                Status = MapPayDetailStatus(response["status"]?.Value<string>()),
                 Preimage = response["transaction"]["settlementVia"]?["preImage"].Value<string>() is null? null: new uint256(response["transaction"]["settlementVia"]["preImage"].Value<string>()),
             };
         }

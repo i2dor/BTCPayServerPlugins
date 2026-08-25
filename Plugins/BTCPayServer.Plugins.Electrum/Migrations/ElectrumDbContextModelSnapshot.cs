@@ -171,6 +171,12 @@ namespace BTCPayServer.Plugins.Electrum.Migrations
                 b.Property<int>("ReceiveGapIndex")
                     .HasColumnType("integer");
 
+                b.Property<int>("ReservedChangeIndex")
+                    .HasColumnType("integer");
+
+                b.Property<int>("ReservedReceiveIndex")
+                    .HasColumnType("integer");
+
                 b.HasKey("Id");
 
                 b.ToTable("tracked_wallets", "electrum");
