@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client.Models;
@@ -81,13 +83,18 @@ Response format:
 
 ```json
 {{
+  ""quoteId"": ""a3f9c2b1d4e8..."",
   ""method"": ""LIGHTNING"",
   ""paymentUrl"": ""lightning:lnbc..."",
-  ""btcAmount"": 1400
+  ""btcAmount"": 1400,
+  ""currency"": ""BTC"",
+  ""quoteExpiresAt"": ""2026-08-25T12:00:00Z""
 }}
 ```
 
+`quoteId` is a deterministic identifier for this (invoiceId, method) pair - safe to use as an idempotency key.
 `paymentUrl` is the URI to pass to a compatible wallet. `btcAmount` is in satoshis.
+`quoteExpiresAt` is when the invoice expires. Do not pay after this time.
 
 After paying, check the invoice status:
 
@@ -104,13 +111,17 @@ Status response:
 
 ```json
 {{
-  ""status"": ""PROCESSING"",
+  ""invoiceId"": ""..."",
+  ""paymentStatus"": ""PROCESSING"",
+  ""deliveryStatus"": ""UNKNOWN"",
+  ""amountSats"": 1400,
   ""paidAt"": null
 }}
 ```
 
-`status` values: PENDING (not yet paid), PROCESSING (payment seen, confirming), SETTLED (paid), EXPIRED, INVALID.
-If PENDING or PROCESSING, wait and check again.
+`paymentStatus` values: PENDING (not yet paid), PROCESSING (payment seen, confirming), PAID (settled), EXPIRED, INVALID, UNKNOWN (indeterminate - retry after a delay).
+`deliveryStatus` is always UNKNOWN for payment-only flows; the merchant controls delivery confirmation.
+If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient state and retry with backoff.
 
 ## Resources
 
@@ -189,8 +200,15 @@ If PENDING or PROCESSING, wait and check again.
 
             var accounting = selectedPrompt.Calculate();
             var btcAmountSats = (long)(accounting.Due * 100_000_000m);
+            var quoteId = ComputeQuoteId(request.InvoiceId, method);
 
-            return Ok(new CreateQuoteResponse(method, paymentUrl, btcAmountSats));
+            return Ok(new CreateQuoteResponse(
+                quoteId,
+                method,
+                paymentUrl,
+                btcAmountSats,
+                "BTC",
+                invoice.ExpirationTime));
         }
 
         [HttpPost("/api/v1/agent/checkout/order-status")]
@@ -211,14 +229,14 @@ If PENDING or PROCESSING, wait and check again.
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
                 return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
 
-            var status = invoice.Status switch
+            var paymentStatus = invoice.Status switch
             {
                 InvoiceStatus.New => "PENDING",
                 InvoiceStatus.Processing => "PROCESSING",
-                InvoiceStatus.Settled => "SETTLED",
+                InvoiceStatus.Settled => "PAID",
                 InvoiceStatus.Expired => "EXPIRED",
                 InvoiceStatus.Invalid => "INVALID",
-                _ => "PENDING"
+                _ => "UNKNOWN"
             };
 
             DateTimeOffset? paidAt = null;
@@ -232,7 +250,21 @@ If PENDING or PROCESSING, wait and check again.
                 }
             }
 
-            return Ok(new OrderStatusResponse(status, paidAt));
+            var amountSats = (long)(invoice.Price * 100_000_000m);
+
+            return Ok(new OrderStatusResponse(
+                request.InvoiceId,
+                paymentStatus,
+                "UNKNOWN",
+                amountSats,
+                paidAt));
+        }
+
+        private static string ComputeQuoteId(string invoiceId, string method)
+        {
+            var input = Encoding.UTF8.GetBytes($"{invoiceId}:{method}");
+            var hash = SHA256.HashData(input);
+            return Convert.ToHexString(hash)[..16].ToLowerInvariant();
         }
     }
 
@@ -247,6 +279,9 @@ If PENDING or PROCESSING, wait and check again.
 
     public class CreateQuoteResponse
     {
+        [JsonProperty("quoteId")]
+        public string QuoteId { get; }
+
         [JsonProperty("method")]
         public string Method { get; }
 
@@ -256,11 +291,20 @@ If PENDING or PROCESSING, wait and check again.
         [JsonProperty("btcAmount")]
         public long BtcAmount { get; }
 
-        public CreateQuoteResponse(string method, string paymentUrl, long btcAmount)
+        [JsonProperty("currency")]
+        public string Currency { get; }
+
+        [JsonProperty("quoteExpiresAt")]
+        public DateTimeOffset QuoteExpiresAt { get; }
+
+        public CreateQuoteResponse(string quoteId, string method, string paymentUrl, long btcAmount, string currency, DateTimeOffset quoteExpiresAt)
         {
+            QuoteId = quoteId;
             Method = method;
             PaymentUrl = paymentUrl;
             BtcAmount = btcAmount;
+            Currency = currency;
+            QuoteExpiresAt = quoteExpiresAt;
         }
     }
 
@@ -272,15 +316,27 @@ If PENDING or PROCESSING, wait and check again.
 
     public class OrderStatusResponse
     {
-        [JsonProperty("status")]
-        public string Status { get; }
+        [JsonProperty("invoiceId")]
+        public string InvoiceId { get; }
+
+        [JsonProperty("paymentStatus")]
+        public string PaymentStatus { get; }
+
+        [JsonProperty("deliveryStatus")]
+        public string DeliveryStatus { get; }
+
+        [JsonProperty("amountSats")]
+        public long AmountSats { get; }
 
         [JsonProperty("paidAt")]
         public DateTimeOffset? PaidAt { get; }
 
-        public OrderStatusResponse(string status, DateTimeOffset? paidAt)
+        public OrderStatusResponse(string invoiceId, string paymentStatus, string deliveryStatus, long amountSats, DateTimeOffset? paidAt)
         {
-            Status = status;
+            InvoiceId = invoiceId;
+            PaymentStatus = paymentStatus;
+            DeliveryStatus = deliveryStatus;
+            AmountSats = amountSats;
             PaidAt = paidAt;
         }
     }
