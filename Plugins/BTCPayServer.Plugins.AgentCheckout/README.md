@@ -78,17 +78,23 @@ Returns a payment URI and amount for an existing invoice.
 
 ```json
 {
+  "quoteId": "a3f9c2b1d4e87f20",
   "method": "LIGHTNING",
   "paymentUrl": "lightning:lnbc95070n1p4rnyrc...",
-  "btcAmount": 9507
+  "btcAmount": 9507,
+  "currency": "BTC",
+  "quoteExpiresAt": "2026-08-25T12:00:00Z"
 }
 ```
 
 | Field | Description |
 |---|---|
+| `quoteId` | Deterministic identifier for this (invoiceId, method) pair — safe to use as an idempotency key |
 | `method` | `LIGHTNING` or `BITCOIN` |
 | `paymentUrl` | URI to pass to a wallet. Lightning: `lightning:lnbc...`. On-chain: `bitcoin:bc1q...?amount=0.00009507` |
 | `btcAmount` | Amount due in satoshis |
+| `currency` | Always `BTC` |
+| `quoteExpiresAt` | ISO 8601 timestamp when the invoice expires. Do not pay after this time. |
 
 **Error responses:**
 
@@ -120,20 +126,30 @@ Check whether an invoice has been paid.
 
 ```json
 {
-  "status": "PROCESSING",
+  "invoiceId": "W9ztGzD8L1YHC7ZqYmnRhs",
+  "paymentStatus": "PROCESSING",
+  "deliveryStatus": "UNKNOWN",
+  "amountSats": 9507,
   "paidAt": null
 }
 ```
 
-| Status | Meaning |
+| Field | Description |
+|---|---|
+| `invoiceId` | The invoice ID, echoed back for idempotent replay |
+| `paymentStatus` | See table below |
+| `deliveryStatus` | Always `UNKNOWN` — BTCPay does not track delivery; the merchant controls that |
+| `amountSats` | Invoice total in satoshis |
+| `paidAt` | ISO 8601 timestamp when `PAID` or `PROCESSING`, `null` otherwise |
+
+| `paymentStatus` | Meaning |
 |---|---|
 | `PENDING` | Invoice exists, no payment seen yet |
 | `PROCESSING` | Payment broadcast, waiting for confirmation |
-| `SETTLED` | Fully paid - deliver the product |
+| `PAID` | Fully settled — deliver the product |
 | `EXPIRED` | Invoice expired before payment |
 | `INVALID` | Invoice marked invalid by BTCPay |
-
-`paidAt` is an ISO 8601 timestamp when `SETTLED` or `PROCESSING`, `null` otherwise.
+| `UNKNOWN` | Indeterminate state — retry with backoff |
 
 ---
 
@@ -146,15 +162,16 @@ Check whether an invoice has been paid.
 
 2. POST /api/v1/agent/checkout/create-quote
    { "invoiceId": "<id from checkout URL>" }
-   -> { method, paymentUrl, btcAmount }
+   -> { quoteId, method, paymentUrl, btcAmount, currency, quoteExpiresAt }
 
 3. Present paymentUrl to wallet / pay automatically
 
 4. Loop every 10s:
    POST /api/v1/agent/checkout/order-status
    { "invoiceId": "<same id>" }
-   -> { status }
-   Stop when status == "SETTLED" or "EXPIRED"
+   -> { invoiceId, paymentStatus, deliveryStatus, amountSats, paidAt }
+   Stop when paymentStatus == "PAID" or "EXPIRED"
+   Retry with backoff if paymentStatus == "UNKNOWN"
 ```
 
 ### curl - create quote (Lightning)
