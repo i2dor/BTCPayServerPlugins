@@ -23,7 +23,7 @@ Vue.component("side-shift", {
                 settleMethodId = toCurrency.replace('_btclike', '').replace('_monerolike', '').replace('_zcashlike', '').toLowerCase();
             }
             window.__SIDESHIFT__ = {
-                parentAffiliateId: "qg0OrfHJV",
+                parentAffiliateId: "c5rsSP0A6",
                 defaultSettleMethodId: settleMethodId,
                 settleAddress: this.toCurrencyAddress,
                 settleAmount: amount,
