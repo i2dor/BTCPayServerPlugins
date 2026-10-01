@@ -1,0 +1,128 @@
+name: Sync upstream + pack plugins
+
+on:
+  schedule:
+    - cron: '0 6 1 * *'   # 1st of each month, 06:00 UTC
+  workflow_dispatch:       # manual trigger from Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+
+    steps:
+      - name: Checkout ff-ref-i2dor
+        uses: actions/checkout@v4
+        with:
+          ref: ff-ref-i2dor
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/Kukks/BTCPayServerPlugins.git
+          git fetch upstream master
+
+      - name: Reset to upstream master, preserve .github
+        run: |
+          cp -r .github /tmp/keep-github
+          git reset --hard upstream/master
+          rm -rf .github
+          cp -r /tmp/keep-github .github
+
+      - name: Re-apply affiliate refs
+        run: |
+          # FixedFloat: ref=fkbyt39c -> ref=84b699yb (2 files)
+          sed -i 's/ref=fkbyt39c/ref=84b699yb/g' \
+            Plugins/BTCPayServer.Plugins.FixedFloat/Resources/js/fixedFloatComponent.js \
+            Plugins/BTCPayServer.Plugins.FixedFloat/Views/Shared/FixedFloat/CheckoutPaymentExtension.cshtml
+
+          # SideShift: qg0OrfHJV -> c5rsSP0A6 (3 files, all occurrences incl. comments)
+          sed -i 's/qg0OrfHJV/c5rsSP0A6/g' \
+            Plugins/BTCPayServer.Plugins.SideShift/SideShiftController.cs \
+            Plugins/BTCPayServer.Plugins.SideShift/Resources/js/sideShiftComponent.js \
+            'Plugins/BTCPayServer.Plugins.SideShift/Views/Shared/SideShift/CheckoutPaymentExtension.cshtml'
+
+      - name: Verify all patches landed
+        run: |
+          set -e
+          if grep -rn "fkbyt39c" Plugins/BTCPayServer.Plugins.FixedFloat/ ; then
+            echo "::error title=FixedFloat sync failed::Old ref 'fkbyt39c' still present after patch - upstream may have refactored. Manual intervention needed."
+            exit 1
+          fi
+          if grep -rn "qg0OrfHJV" Plugins/BTCPayServer.Plugins.SideShift/ ; then
+            echo "::error title=SideShift sync failed::Old affiliate 'qg0OrfHJV' still present after patch - upstream may have refactored. Manual intervention needed."
+            exit 1
+          fi
+          if ! grep -rq "84b699yb" Plugins/BTCPayServer.Plugins.FixedFloat/ ; then
+            echo "::error title=FixedFloat sync failed::My ref '84b699yb' missing - patch did not apply."
+            exit 1
+          fi
+          if ! grep -rq "c5rsSP0A6" Plugins/BTCPayServer.Plugins.SideShift/ ; then
+            echo "::error title=SideShift sync failed::My affiliate 'c5rsSP0A6' missing - patch did not apply."
+            exit 1
+          fi
+          echo "All patches verified"
+
+      - name: Commit + push if upstream changed
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No upstream changes since last sync - skipping push"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "auto-sync: upstream master + apply my affiliate refs"
+            git push origin HEAD:ff-ref-i2dor --force-with-lease
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  pack:
+    needs: sync
+    # Build when upstream actually changed, OR when manually triggered (always rebuild on demand)
+    if: needs.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - BTCPayServer.Plugins.FixedFloat
+          - BTCPayServer.Plugins.SideShift
+
+    steps:
+      - name: Checkout latest ff-ref-i2dor (post-sync)
+        uses: actions/checkout@v4
+        with:
+          ref: ff-ref-i2dor
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish ${{ matrix.plugin }}
+        working-directory: Plugins/${{ matrix.plugin }}
+        run: dotnet publish -c Altcoins-Release -o bin/publish/${{ matrix.plugin }}
+
+      - name: Pack ${{ matrix.plugin }} into .btcpay
+        working-directory: Plugins/${{ matrix.plugin }}
+        run: |
+          dotnet run --project ../../submodules/btcpayserver/BTCPayServer.PluginPacker -- \
+            bin/publish/${{ matrix.plugin }} \
+            ${{ matrix.plugin }} \
+            ../packed
+
+      - name: Upload .btcpay artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.plugin }}-btcpay
+          path: Plugins/packed/**/*.btcpay
+          if-no-files-found: error
+          retention-days: 90

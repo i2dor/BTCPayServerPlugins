@@ -156,7 +156,7 @@ namespace BTCPayServer.Plugins.SideShift
             //         settleCoin = request.ShiftCurrency,
             //         settleNetwork = request.ShiftNetwork,
             //         depositAmount = request.Amount.ToString(),
-            //         affiliateId = "qg0OrfHJV"
+            //         affiliateId = "c5rsSP0A6"
             //     }
             // );
             // quoteResponse.EnsureSuccessStatusCode();
@@ -166,7 +166,7 @@ namespace BTCPayServer.Plugins.SideShift
             //         settleAddress = request.Destination,
             //         settleMemo = request.Memo,
             //         quoteId = quote.id,
-            //         affiliateId = "qg0OrfHJV"
+            //         affiliateId = "c5rsSP0A6"
             //     }
             // );
             // shiftResponse.EnsureSuccessStatusCode();
@@ -176,7 +176,7 @@ namespace BTCPayServer.Plugins.SideShift
             var shiftResponse = await client.PostAsJsonAsync("https://sideshift.ai/api/v2/shifts/variable", new
                 {
                     settleAddress = request.Destination,
-                    affiliateId = "qg0OrfHJV",
+                    affiliateId = "c5rsSP0A6",
                     settleMemo = request.Memo,
                     depositCoin = cryptoCode,
                     settleCoin = request.ShiftCurrency,
