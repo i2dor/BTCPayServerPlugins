@@ -33,6 +33,7 @@ Navigate to **Store Settings -> Integrations -> Agent Checkout**.
 | Allow on-chain BTC | On | Whether agents can request an on-chain Bitcoin address. |
 | Rate limit (req/min per IP) | 30 | Max calls per IP per minute to the quote and status endpoints. Returns 429 when exceeded. |
 | Custom llms.txt content | empty | Markdown appended to the per-store `/stores/{storeId}/llms.txt`. Use this to add store-specific instructions for agents. |
+| Receipt signing key | auto-generated | Nostr key used to sign offers (kind 1402) and receipts (kind 31402). The public key (npub) is shown read-only. Import an existing nsec or generate a fresh key. See `docs/merchant-receipts-nip.md`. |
 
 ---
 
@@ -84,7 +85,16 @@ Returns a payment URI and amount for an existing invoice.
   "btcAmount": 9507,
   "currency": "BTC",
   "quoteExpiresAt": "2026-08-25T12:00:00Z",
-  "paymentHash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+  "paymentHash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+  "offer": {
+    "kind": 1402,
+    "pubkey": "<merchant receipt pubkey hex>",
+    "created_at": 1762480000,
+    "content": "",
+    "tags": [["invoice", "..."], ["amount", "950700"], ["method", "LIGHTNING"], ["bolt11", "lnbc..."], ["payment_hash", "..."], ["quote", "a3f9c2b1d4e87f20"], ["valid_until", "..."], ["store", "..."]],
+    "id": "<event id>",
+    "sig": "<schnorr sig>"
+  }
 }
 ```
 
@@ -97,6 +107,7 @@ Returns a payment URI and amount for an existing invoice.
 | `currency` | Always `BTC` |
 | `quoteExpiresAt` | ISO 8601 timestamp when the invoice expires. Do not pay after this time. |
 | `paymentHash` | Lightning payment hash (hex) when `method` is `LIGHTNING`, otherwise `null`. Match the preimage your wallet returns to verify payment. |
+| `offer` | Signed Nostr kind 1402 event (see below). Verify signature and `pubkey` before paying. |
 
 **Error responses:**
 
@@ -154,6 +165,61 @@ Check whether an invoice has been paid.
 | `EXPIRED` | Invoice expired before payment |
 | `INVALID` | Invoice marked invalid by BTCPay |
 | `UNKNOWN` | Indeterminate state — retry with backoff |
+
+### `POST /api/v1/agent/checkout/receipt`
+
+Returns a signed Nostr receipt (kind 31402) for an invoice. The receipt states payment status, delivery status, amounts, and optionally references the offer.
+
+**Request:**
+
+```json
+{
+  "invoiceId": "W9ztGzD8L1YHC7ZqYmnRhs"
+}
+```
+
+**Response `200`:**
+
+```json
+{
+  "receipt": {
+    "kind": 31402,
+    "pubkey": "<merchant receipt pubkey hex>",
+    "created_at": 1762480100,
+    "content": "",
+    "tags": [
+      ["d", "W9ztGzD8L1YHC7ZqYmnRhs"],
+      ["e", "<offer event id>"],
+      ["status", "PAID"],
+      ["delivery", "UNKNOWN"],
+      ["amount", "950700"],
+      ["price", "0.50", "RON"],
+      ["method", "LIGHTNING"],
+      ["payment_hash", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"],
+      ["quote", "a3f9c2b1d4e87f20"],
+      ["quote_expires_at", "1762481234"],
+      ["paid_at", "1762480100"],
+      ["store", "<storeId>"]
+    ],
+    "id": "<event id>",
+    "sig": "<schnorr sig>"
+  },
+  "pubkey": "<merchant receipt pubkey hex>",
+  "npub": "npub1..."
+}
+```
+
+Verify: check `sig` over `id`, confirm `pubkey` matches the receipt signing key in `llms.txt`, confirm `d` equals the invoice you paid. See `docs/merchant-receipts-nip.md` for the full spec.
+
+---
+
+## Nostr offers and receipts
+
+Each `create-quote` response includes a signed Nostr offer (kind 1402). After payment, call `receipt` to get a signed receipt (kind 31402). Together, offer and receipt give a payer portable signed evidence of what was agreed and what was paid, without relying on a live HTTP connection.
+
+Receipt signing key management: **Store Settings > Integrations > Agent Checkout**. A key is auto-generated on first use. The public key (npub) appears in `/stores/{storeId}/llms.txt` so agents can discover and pin it at quote time.
+
+Spec: [`docs/merchant-receipts-nip.md`](docs/merchant-receipts-nip.md)
 
 ---
 
