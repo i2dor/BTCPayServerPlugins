@@ -47,6 +47,24 @@ public class AgentCheckoutTests
         Assert.Equal(expected, AgentCheckoutSettings.IsActive(settings));
     }
 
+    [Fact]
+    public void SettingsView_EnabledWithoutOptIn_ShowsDisabled()
+    {
+        var settings = new AgentCheckoutSettings { Enabled = true, OptedIn = false };
+        var clone = new AgentCheckoutSettings
+        {
+            Enabled = AgentCheckoutSettings.IsActive(settings),
+            OptedIn = settings.OptedIn,
+            AllowLightning = settings.AllowLightning,
+            AllowOnChain = settings.AllowOnChain,
+            RateLimitPerMinute = settings.RateLimitPerMinute,
+            LlmsTxtAppend = settings.LlmsTxtAppend,
+            ReceiptPrivateKeyHex = settings.ReceiptPrivateKeyHex
+        };
+        Assert.False(clone.Enabled);
+        Assert.True(settings.Enabled);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("contains spaces here")]

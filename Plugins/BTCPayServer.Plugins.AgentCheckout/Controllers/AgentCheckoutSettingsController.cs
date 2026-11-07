@@ -32,7 +32,19 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             var key = await _service.GetReceiptKey(storeId);
             if (key != null)
                 ViewBag.ReceiptNpub = AgentCheckoutService.GetReceiptNpub(key);
-            return View(settings);
+            var viewModel = new AgentCheckoutSettings
+            {
+                Enabled = AgentCheckoutSettings.IsActive(settings),
+                OptedIn = settings.OptedIn,
+                AllowLightning = settings.AllowLightning,
+                AllowOnChain = settings.AllowOnChain,
+                RateLimitPerMinute = settings.RateLimitPerMinute,
+                LlmsTxtAppend = settings.LlmsTxtAppend,
+                ReceiptPrivateKeyHex = settings.ReceiptPrivateKeyHex
+            };
+            if (settings.Enabled && !settings.OptedIn)
+                ViewBag.OptInNotice = "Agent Checkout was enabled before 1.1.1 and requires a one-time re-save to reactivate. Enable the toggle and click Save to confirm.";
+            return View(viewModel);
         }
 
         [HttpPost("")]
