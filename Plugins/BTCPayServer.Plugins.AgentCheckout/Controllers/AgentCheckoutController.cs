@@ -381,14 +381,24 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             var btcPmId = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
             var prompts = invoice.GetPaymentPrompts();
 
+            _handlers.TryGetValue(lnPmId, out var lnH);
             var payments = invoice.GetPayments(false).Where(p => p.Accounted).ToList();
             var paidMethods = new HashSet<string>();
+            var paymentHashes = new HashSet<string>();
             var txids = new HashSet<string>();
             DateTimeOffset? paidAt = null;
             foreach (var p in payments)
             {
                 if (p.PaymentMethodId == lnPmId)
+                {
                     paidMethods.Add("LIGHTNING");
+                    if (lnH != null)
+                    {
+                        var lnData = p.GetDetails<LightningLikePaymentData>(lnH);
+                        if (lnData?.PaymentHash != null)
+                            paymentHashes.Add(lnData.PaymentHash.ToString());
+                    }
+                }
                 else if (p.PaymentMethodId == btcPmId)
                 {
                     paidMethods.Add("BITCOIN");
@@ -448,8 +458,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             tags.Add(new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } });
             tags.Add(new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } });
             foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "method", Data = new() { m } });
-            var paymentHash = GetLightningPaymentHash(invoice);
-            if (paymentHash != null) tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
+            foreach (var ph in paymentHashes) tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { ph } });
             foreach (var txid in txids) tags.Add(new() { TagIdentifier = "txid", Data = new() { txid } });
             foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "quote", Data = new() { ComputeQuoteId(request.InvoiceId, m) } });
             tags.Add(new() { TagIdentifier = "quote_expires_at", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
