@@ -385,7 +385,20 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 }
             }
 
-            var amountSats = (long)(invoice.Price * 100_000_000m);
+            var statusLnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
+            var statusBtcPmId = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
+            var statusPrompts = invoice.GetPaymentPrompts();
+            PaymentPrompt? statusAmtPrompt = null;
+            if (statusPrompts.TryGetValue(statusLnPmId, out var statusLnP) && statusLnP?.Activated == true)
+                statusAmtPrompt = statusLnP;
+            else if (statusPrompts.TryGetValue(statusBtcPmId, out var statusBtcP) && statusBtcP?.Activated == true)
+                statusAmtPrompt = statusBtcP;
+            long amountSats = 0;
+            if (statusAmtPrompt != null)
+            {
+                var statusAcc = statusAmtPrompt.Calculate();
+                amountSats = (long)(statusAcc.TotalDue * 100_000_000m);
+            }
             var paymentHash = GetLightningPaymentHash(invoice);
 
             return Ok(new OrderStatusResponse(
