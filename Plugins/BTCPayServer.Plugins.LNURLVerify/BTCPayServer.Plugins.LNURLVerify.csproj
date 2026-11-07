@@ -39,8 +39,5 @@
         <InternalsVisibleTo Include="BTCPayServer.Plugins.LNURLVerify.Tests" />
     </ItemGroup>
 
-    <ItemGroup>
-        <AdditionalFiles Include="Views\Shared\LNURLVerify\LNPaymentMethodSetupTab.cshtml" />
-    </ItemGroup>
 
 </Project>
