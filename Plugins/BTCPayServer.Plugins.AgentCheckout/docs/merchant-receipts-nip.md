@@ -67,7 +67,7 @@ A receipt is an addressable event of kind `31402`, signed by the merchant's rece
   "content": "",
   "tags": [
     ["d", "<invoice id>"],
-    ["e", "<id of the kind 1402 offer the payer acted on>"],
+    ["e", "<id of a kind 1402 offer issued for this invoice, if cached>"],
     ["status", "PAID"],
     ["delivery", "UNKNOWN"],
     ["amount", "118000"],
@@ -91,7 +91,7 @@ A receipt is an addressable event of kind `31402`, signed by the merchant's rece
 | tag | value | required | meaning |
 |---|---|---|---|
 | `d` | invoice id | yes | Unique per merchant key. Identifies the invoice this receipt is about. |
-| `e` | offer event id | no | The kind `1402` offer the payment corresponds to, when the merchant issued one. Repeat if payments were made under several offers. |
+| `e` | offer event id | no | A kind `1402` offer previously issued for this invoice. Present on a best-effort basis; may be absent if the offer was not held in memory at receipt time. Repeat for each distinct offer id the server has. |
 | `status` | `PENDING`, `PROCESSING`, `PAID`, `EXPIRED`, `INVALID`, `UNKNOWN` | yes | Payment verdict at `created_at`. |
 | `delivery` | `UNKNOWN`, `DELIVERED`, `FAILED` | yes | Delivery verdict at `created_at`. Independent of `status`. |
 | `amount` | millisatoshis, string | yes | Total owed at the locked exchange rate. |
@@ -136,7 +136,7 @@ A receipt proves that the holder of the merchant key made a statement. It does n
 
 1. Check the event signature and that `kind` is `31402`.
 2. Check that `pubkey` matches the key recorded at quote time, which is the `pubkey` of the offer.
-3. Check that `d` is the invoice the payer paid and, if present, that `e` points to the offer the payer acted on.
+3. Check that `d` is the invoice the payer paid. If `e` is present, verify it matches the offer the payer received; its absence does not invalidate the receipt.
 4. For Lightning, check that sha256(preimage from the wallet) equals `payment_hash`.
 5. Treat `status` and `delivery` as separate verdicts. Treat `UNKNOWN` as transient and ask again with backoff.
 
