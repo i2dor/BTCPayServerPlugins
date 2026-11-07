@@ -72,7 +72,13 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             var npub = AgentCheckoutService.GetReceiptNpub(key);
             var content = BuildLlmsTxt(npub);
             if (!string.IsNullOrWhiteSpace(settings.LlmsTxtAppend))
-                content += "\n" + settings.LlmsTxtAppend.Trim() + "\n";
+            {
+                var merchantContent = string.Join("\n",
+                    settings.LlmsTxtAppend.Split('\n')
+                        .Where(l => !l.TrimStart().StartsWith("Receipt signing key:", StringComparison.OrdinalIgnoreCase)));
+                if (!string.IsNullOrWhiteSpace(merchantContent))
+                    content += "\n## Merchant notes\n\n" + merchantContent.Trim() + "\n";
+            }
 
             return Content(content, "text/plain; charset=utf-8");
         }

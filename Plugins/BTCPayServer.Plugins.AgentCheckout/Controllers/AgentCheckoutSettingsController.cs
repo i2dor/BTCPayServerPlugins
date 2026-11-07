@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
@@ -14,6 +15,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Route("plugins/{storeId}/agent-checkout")]
+    [TypeFilter(typeof(AgentCheckoutExceptionFilter))]
     public class AgentCheckoutSettingsController : Controller
     {
         private readonly AgentCheckoutService _service;
@@ -29,8 +31,12 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             var settings = await _service.GetSettings(storeId);
             if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
             {
-                var key = NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
-                ViewBag.ReceiptNpub = AgentCheckoutService.GetReceiptNpub(key);
+                try
+                {
+                    var key = NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
+                    ViewBag.ReceiptNpub = AgentCheckoutService.GetReceiptNpub(key);
+                }
+                catch { }
             }
             return View(settings);
         }
@@ -38,6 +44,12 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         [HttpPost("")]
         public async Task<IActionResult> UpdateSettings(string storeId, AgentCheckoutSettings settings, string? importReceiptKey, string? keyAction)
         {
+            if (!ModelState.IsValid)
+            {
+                TempData[WellKnownTempData.ErrorMessage] = "Invalid settings. Check the values and try again.";
+                return RedirectToAction(nameof(UpdateSettings), new { storeId });
+            }
+
             if (keyAction == "generate")
             {
                 var newKey = ECPrivKey.Create(RandomUtils.GetBytes(32));
@@ -67,6 +79,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
                 settings.ReceiptPrivateKeyHex = existing.ReceiptPrivateKeyHex;
             }
 
+            settings.RateLimitPerMinute = Math.Clamp(settings.RateLimitPerMinute, 1, 300);
             await _service.UpdateSettings(storeId, settings);
             TempData[WellKnownTempData.SuccessMessage] = "Agent Checkout settings saved.";
             return RedirectToAction(nameof(UpdateSettings), new { storeId });
