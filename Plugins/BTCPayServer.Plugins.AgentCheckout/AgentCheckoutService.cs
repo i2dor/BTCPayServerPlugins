@@ -67,6 +67,12 @@ namespace BTCPayServer.Plugins.AgentCheckout
             return ToBech32Nostr("npub", pubKeyBytes);
         }
 
+        public static string GetReceiptNpubFromHex(string hexPubKey)
+        {
+            var pubKeyBytes = Convert.FromHexString(hexPubKey);
+            return ToBech32Nostr("npub", pubKeyBytes);
+        }
+
         private static string ToBech32Nostr(string hrp, byte[] data)
         {
             const string CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
