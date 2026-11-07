@@ -362,6 +362,48 @@ public class AgentCheckoutTests
         Assert.DoesNotContain(signed.Tags, t => t.TagIdentifier == "preimage");
     }
 
+    [Fact]
+    public void GetPaymentHashForLightningPayment_ReturnsHashFromDetails()
+    {
+        var details = new LightningPaymentData
+        {
+            PaymentHash = "434c60e10d14a32d88cb0e8254107f34fc4309efed5fbfb68c4dd86886d7f080",
+            Preimage = "ff"
+        };
+        var result = AgentCheckoutController.GetPaymentHashForLightningPayment(details, "someid");
+        Assert.Equal("434c60e10d14a32d88cb0e8254107f34fc4309efed5fbfb68c4dd86886d7f080", result);
+        Assert.NotEqual("ff", result);
+    }
+
+    [Fact]
+    public void GetPaymentHashForLightningPayment_NullDetails_UsesHexPaymentId()
+    {
+        var hex64 = "434c60e10d14a32d88cb0e8254107f34fc4309efed5fbfb68c4dd86886d7f080";
+        var result = AgentCheckoutController.GetPaymentHashForLightningPayment(null, hex64);
+        Assert.Equal(hex64, result);
+    }
+
+    [Fact]
+    public void GetPaymentHashForLightningPayment_NullDetails_NonHexId_ReturnsNull()
+    {
+        var result = AgentCheckoutController.GetPaymentHashForLightningPayment(null, "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzq");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetPaymentHashForLightningPayment_ResultNeverEqualsPreimage()
+    {
+        var preimage = "aabbccdd" + new string('0', 56);
+        var details = new LightningPaymentData
+        {
+            PaymentHash = "434c60e10d14a32d88cb0e8254107f34fc4309efed5fbfb68c4dd86886d7f080",
+            Preimage = preimage
+        };
+        var result = AgentCheckoutController.GetPaymentHashForLightningPayment(details, preimage);
+        Assert.NotEqual(preimage, result);
+        Assert.Equal("434c60e10d14a32d88cb0e8254107f34fc4309efed5fbfb68c4dd86886d7f080", result);
+    }
+
     private sealed class StubStoreRepository : IStoreRepository
     {
         public Task<T?> GetSettingAsync<T>(string storeId, string name) where T : class =>

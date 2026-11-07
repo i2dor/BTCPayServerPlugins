@@ -450,9 +450,10 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                     paidMethods.Add("LIGHTNING");
                     if (lnH != null)
                     {
-                        var lnData = p.GetDetails<LightningLikePaymentData>(lnH);
-                        if (lnData?.PaymentHash != null)
-                            paymentHashes.Add(lnData.PaymentHash.ToString());
+                        var lnData = p.GetDetails<LightningPaymentData>(lnH);
+                        var ph = GetPaymentHashForLightningPayment(lnData, p.Id);
+                        if (ph != null)
+                            paymentHashes.Add(ph);
                     }
                 }
                 else if (p.PaymentMethodId == btcPmId)
@@ -662,6 +663,20 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 return null;
             var details = handler.ParsePaymentPromptDetails(prompt.Details) as LigthningPaymentPromptDetails;
             return details?.PaymentHash?.ToString();
+        }
+
+        internal static string? GetPaymentHashForLightningPayment(object? details, string paymentId)
+        {
+            if (details is LightningPaymentData ld &&
+                !string.IsNullOrEmpty(ld.PaymentHash))
+                return ld.PaymentHash;
+
+            // LightningListener sets the payment Id to the payment hash
+            if (paymentId.Length == 64 &&
+                paymentId.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+                return paymentId;
+
+            return null;
         }
 
         internal static string ComputeQuoteId(string invoiceId, string method)
