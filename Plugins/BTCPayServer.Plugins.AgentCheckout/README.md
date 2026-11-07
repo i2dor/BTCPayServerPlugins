@@ -323,6 +323,8 @@ Payment issues: support@example.com
 
 The rate limit applies **per IP per minute** across `create-quote` and `order-status` combined. The default is 30 requests/minute. For high-frequency polling agents set a higher limit (e.g. 120) or configure exponential back-off on the agent side.
 
+IPv6 addresses are bucketed at /64, so the entire prefix counts as one client. The rate-limit key is the client IP as seen by ASP.NET Core. When BTCPay is behind a reverse proxy, make sure the proxy is configured to forward the real client IP via `X-Forwarded-For` and that BTCPay trusts the proxy's `ForwardedHeaders` middleware.
+
 ---
 
 ## Development

@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -53,6 +55,13 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         [HttpGet("/stores/{storeId}/llms.txt")]
         public async Task<IActionResult> GetStoreLlmsTxt(string storeId)
         {
+            if (!IsValidStoreId(storeId))
+                return NotFound();
+
+            var ip = ClientIp;
+            if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
+                return RateLimited();
+
             var settings = await _agentCheckoutService.GetSettings(storeId);
             if (!settings.Enabled)
                 return NotFound();
@@ -174,10 +183,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         }
 
         [HttpPost("/api/v1/agent/checkout/create-quote")]
+        [RequestSizeLimit(4096)]
         public async Task<IActionResult> CreateQuote([FromBody] CreateQuoteRequest? request)
         {
             if (string.IsNullOrEmpty(request?.InvoiceId))
                 return BadRequest(new ErrorResponse("invoice-id-required", "invoiceId is required."));
+
+            if (!IsValidInvoiceId(request.InvoiceId))
+                return BadRequest(new ErrorResponse("invoice-id-invalid", "invoiceId format is invalid."));
 
             var ip = ClientIp;
             if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
@@ -314,10 +327,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         }
 
         [HttpPost("/api/v1/agent/checkout/order-status")]
+        [RequestSizeLimit(4096)]
         public async Task<IActionResult> GetOrderStatus([FromBody] OrderStatusRequest? request)
         {
             if (string.IsNullOrEmpty(request?.InvoiceId))
                 return BadRequest(new ErrorResponse("invoice-id-required", "invoiceId is required."));
+
+            if (!IsValidInvoiceId(request.InvoiceId))
+                return BadRequest(new ErrorResponse("invoice-id-invalid", "invoiceId format is invalid."));
 
             var ip = ClientIp;
             if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
@@ -368,10 +385,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         }
 
         [HttpPost("/api/v1/agent/checkout/receipt")]
+        [RequestSizeLimit(4096)]
         public async Task<IActionResult> GetReceipt([FromBody] ReceiptRequest? request)
         {
             if (string.IsNullOrEmpty(request?.InvoiceId))
                 return BadRequest(new ErrorResponse("invoice-id-required", "invoiceId is required."));
+
+            if (!IsValidInvoiceId(request.InvoiceId))
+                return BadRequest(new ErrorResponse("invoice-id-invalid", "invoiceId format is invalid."));
 
             var ip = ClientIp;
             if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
@@ -489,7 +510,27 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         }
 
         private string ClientIp =>
-            HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            GetRateLimitKey(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+        internal static string GetRateLimitKey(string ip)
+        {
+            if (IPAddress.TryParse(ip, out var addr) &&
+                addr.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                var bytes = addr.GetAddressBytes();
+                for (int i = 8; i < 16; i++) bytes[i] = 0;
+                return new IPAddress(bytes) + "/64";
+            }
+            return ip;
+        }
+
+        internal static bool IsValidStoreId(string id) =>
+            id.Length >= 10 && id.Length <= 64 &&
+            id.All(c => char.IsLetterOrDigit(c) || c == '-' || c == '_');
+
+        internal static bool IsValidInvoiceId(string id) =>
+            id.Length >= 10 && id.Length <= 64 &&
+            id.All(c => char.IsLetterOrDigit(c) || c == '-' || c == '_');
 
         private IActionResult RateLimited()
         {

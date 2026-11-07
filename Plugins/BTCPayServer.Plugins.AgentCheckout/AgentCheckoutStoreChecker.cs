@@ -29,7 +29,8 @@ namespace BTCPayServer.Plugins.AgentCheckout
                 return cached;
             var store = await _storeRepo.FindStore(storeId);
             var exists = store != null;
-            _cache.Set(cacheKey, exists, TimeSpan.FromMinutes(5));
+            if (exists)
+                _cache.Set(cacheKey, true, TimeSpan.FromMinutes(5));
             return exists;
         }
     }
