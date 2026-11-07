@@ -83,7 +83,8 @@ Returns a payment URI and amount for an existing invoice.
   "paymentUrl": "lightning:lnbc95070n1p4rnyrc...",
   "btcAmount": 9507,
   "currency": "BTC",
-  "quoteExpiresAt": "2026-08-25T12:00:00Z"
+  "quoteExpiresAt": "2026-08-25T12:00:00Z",
+  "paymentHash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 }
 ```
 
@@ -95,6 +96,7 @@ Returns a payment URI and amount for an existing invoice.
 | `btcAmount` | Amount due in satoshis |
 | `currency` | Always `BTC` |
 | `quoteExpiresAt` | ISO 8601 timestamp when the invoice expires. Do not pay after this time. |
+| `paymentHash` | Lightning payment hash (hex) when `method` is `LIGHTNING`, otherwise `null`. Match the preimage your wallet returns to verify payment. |
 
 **Error responses:**
 
@@ -130,7 +132,8 @@ Check whether an invoice has been paid.
   "paymentStatus": "PROCESSING",
   "deliveryStatus": "UNKNOWN",
   "amountSats": 9507,
-  "paidAt": null
+  "paidAt": null,
+  "paymentHash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 }
 ```
 
@@ -141,6 +144,7 @@ Check whether an invoice has been paid.
 | `deliveryStatus` | Always `UNKNOWN` — BTCPay does not track delivery; the merchant controls that |
 | `amountSats` | Invoice total in satoshis |
 | `paidAt` | ISO 8601 timestamp when `PAID` or `PROCESSING`, `null` otherwise |
+| `paymentHash` | Lightning payment hash (hex) when a Lightning prompt exists, otherwise `null`. Match the preimage your wallet returns to verify payment. |
 
 | `paymentStatus` | Meaning |
 |---|---|
@@ -162,14 +166,14 @@ Check whether an invoice has been paid.
 
 2. POST /api/v1/agent/checkout/create-quote
    { "invoiceId": "<id from checkout URL>" }
-   -> { quoteId, method, paymentUrl, btcAmount, currency, quoteExpiresAt }
+   -> { quoteId, method, paymentUrl, btcAmount, currency, quoteExpiresAt, paymentHash }
 
 3. Present paymentUrl to wallet / pay automatically
 
 4. Loop every 10s:
    POST /api/v1/agent/checkout/order-status
    { "invoiceId": "<same id>" }
-   -> { invoiceId, paymentStatus, deliveryStatus, amountSats, paidAt }
+   -> { invoiceId, paymentStatus, deliveryStatus, amountSats, paidAt, paymentHash }
    Stop when paymentStatus == "PAID" or "EXPIRED"
    Retry with backoff if paymentStatus == "UNKNOWN"
 ```

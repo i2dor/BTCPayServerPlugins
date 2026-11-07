@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Payments;
+using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
@@ -24,15 +25,18 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         private readonly InvoiceRepository _invoiceRepository;
         private readonly Dictionary<PaymentMethodId, IPaymentLinkExtension> _paymentLinkExtensions;
         private readonly AgentCheckoutService _agentCheckoutService;
+        private readonly PaymentMethodHandlerDictionary _handlers;
 
         public AgentCheckoutController(
             InvoiceRepository invoiceRepository,
             Dictionary<PaymentMethodId, IPaymentLinkExtension> paymentLinkExtensions,
-            AgentCheckoutService agentCheckoutService)
+            AgentCheckoutService agentCheckoutService,
+            PaymentMethodHandlerDictionary handlers)
         {
             _invoiceRepository = invoiceRepository;
             _paymentLinkExtensions = paymentLinkExtensions;
             _agentCheckoutService = agentCheckoutService;
+            _handlers = handlers;
         }
 
         [HttpGet("/stores/{storeId}/llms.txt")]
@@ -88,13 +92,15 @@ Response format:
   ""paymentUrl"": ""lightning:lnbc..."",
   ""btcAmount"": 1400,
   ""currency"": ""BTC"",
-  ""quoteExpiresAt"": ""2026-08-25T12:00:00Z""
+  ""quoteExpiresAt"": ""2026-08-25T12:00:00Z"",
+  ""paymentHash"": ""a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6""
 }}
 ```
 
 `quoteId` is a deterministic identifier for this (invoiceId, method) pair - safe to use as an idempotency key.
 `paymentUrl` is the URI to pass to a compatible wallet. `btcAmount` is in satoshis.
 `quoteExpiresAt` is when the invoice expires. Do not pay after this time.
+`paymentHash` is the Lightning payment hash (hex) when the method is LIGHTNING, otherwise null. Your wallet returns the matching preimage after paying; keep it as proof of payment.
 
 After paying, check the invoice status:
 
@@ -115,7 +121,8 @@ Status response:
   ""paymentStatus"": ""PROCESSING"",
   ""deliveryStatus"": ""UNKNOWN"",
   ""amountSats"": 1400,
-  ""paidAt"": null
+  ""paidAt"": null,
+  ""paymentHash"": ""a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6""
 }}
 ```
 
@@ -204,6 +211,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             var accounting = selectedPrompt.Calculate();
             var btcAmountSats = (long)(accounting.Due * 100_000_000m);
             var quoteId = ComputeQuoteId(request.InvoiceId, method);
+            var paymentHash = method == "LIGHTNING" ? GetLightningPaymentHash(invoice) : null;
 
             return Ok(new CreateQuoteResponse(
                 quoteId,
@@ -211,7 +219,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 paymentUrl,
                 btcAmountSats,
                 "BTC",
-                invoice.ExpirationTime));
+                invoice.ExpirationTime,
+                paymentHash));
         }
 
         [HttpPost("/api/v1/agent/checkout/order-status")]
@@ -257,13 +266,15 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             }
 
             var amountSats = (long)(invoice.Price * 100_000_000m);
+            var paymentHash = GetLightningPaymentHash(invoice);
 
             return Ok(new OrderStatusResponse(
                 request.InvoiceId,
                 paymentStatus,
                 "UNKNOWN",
                 amountSats,
-                paidAt));
+                paidAt,
+                paymentHash));
         }
 
         private string ClientIp =>
@@ -273,6 +284,18 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         {
             Response.Headers["Retry-After"] = "60";
             return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
+        }
+
+        private string? GetLightningPaymentHash(InvoiceEntity invoice)
+        {
+            var lnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
+            var prompts = invoice.GetPaymentPrompts();
+            if (!prompts.TryGetValue(lnPmId, out var prompt) || prompt?.Activated != true)
+                return null;
+            if (!_handlers.TryGetValue(lnPmId, out var handler))
+                return null;
+            var details = handler.ParsePaymentPromptDetails(prompt.Details) as LigthningPaymentPromptDetails;
+            return details?.PaymentHash?.ToString();
         }
 
         private static string ComputeQuoteId(string invoiceId, string method)
@@ -312,7 +335,10 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         [JsonProperty("quoteExpiresAt")]
         public DateTimeOffset QuoteExpiresAt { get; }
 
-        public CreateQuoteResponse(string quoteId, string method, string paymentUrl, long btcAmount, string currency, DateTimeOffset quoteExpiresAt)
+        [JsonProperty("paymentHash")]
+        public string? PaymentHash { get; }
+
+        public CreateQuoteResponse(string quoteId, string method, string paymentUrl, long btcAmount, string currency, DateTimeOffset quoteExpiresAt, string? paymentHash)
         {
             QuoteId = quoteId;
             Method = method;
@@ -320,6 +346,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             BtcAmount = btcAmount;
             Currency = currency;
             QuoteExpiresAt = quoteExpiresAt;
+            PaymentHash = paymentHash;
         }
     }
 
@@ -346,13 +373,17 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         [JsonProperty("paidAt")]
         public DateTimeOffset? PaidAt { get; }
 
-        public OrderStatusResponse(string invoiceId, string paymentStatus, string deliveryStatus, long amountSats, DateTimeOffset? paidAt)
+        [JsonProperty("paymentHash")]
+        public string? PaymentHash { get; }
+
+        public OrderStatusResponse(string invoiceId, string paymentStatus, string deliveryStatus, long amountSats, DateTimeOffset? paidAt, string? paymentHash)
         {
             InvoiceId = invoiceId;
             PaymentStatus = paymentStatus;
             DeliveryStatus = deliveryStatus;
             AmountSats = amountSats;
             PaidAt = paidAt;
+            PaymentHash = paymentHash;
         }
     }
 
