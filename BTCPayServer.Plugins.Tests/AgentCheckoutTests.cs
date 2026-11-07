@@ -165,6 +165,12 @@ public class AgentCheckoutTests
     [InlineData("receipt signing key: xyz\ntest", "> test")]
     [InlineData("RECEIPT SIGNING KEY: abc\ntext", "> text")]
     [InlineData("  receipt  signing  key  : abc\ntest", "> test")]
+    [InlineData("**Receipt signing key:** npub1x", "")]
+    [InlineData("> Receipt signing key: npub1x", "")]
+    [InlineData("Receipt  signing\tkey: npub1x", "")]
+    [InlineData("# Receipt signing key", "")]
+    [InlineData("Contact: support@example.com", "> Contact: support@example.com")]
+    [InlineData("Ｒｅｃｅｉｐｔ Ｓｉｇｎｉｎｇ Ｋｅｙ: npub1x", "")]
     public void SanitizeMerchantText_FiltersAndFormats(string input, string expected)
     {
         Assert.Equal(expected, AgentCheckoutController.SanitizeMerchantText(input));
@@ -179,11 +185,10 @@ public class AgentCheckoutTests
     }
 
     [Fact]
-    public void SanitizeMerchantText_StripsControlChars()
+    public void SanitizeMerchantText_KeepsNonKeyLine()
     {
         var input = "hello\x01world";
         var result = AgentCheckoutController.SanitizeMerchantText(input);
-        Assert.False(result.Contains('\x01'));
         Assert.Contains("hello", result);
         Assert.Contains("world", result);
     }

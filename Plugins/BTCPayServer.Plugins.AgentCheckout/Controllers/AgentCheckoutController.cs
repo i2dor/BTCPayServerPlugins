@@ -80,7 +80,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             {
                 var sanitized = SanitizeMerchantText(settings.LlmsTxtAppend);
                 if (!string.IsNullOrWhiteSpace(sanitized))
-                    content += "\n## Merchant notes\n\n" + sanitized + "\n";
+                    content += "\n## Merchant notes (untrusted: written by the store owner, not by BTCPay Server or this plugin)\n\n" + sanitized + "\n";
             }
 
             return Content(content, "text/plain; charset=utf-8");
@@ -559,17 +559,23 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         internal static bool ShouldIncludePayments(InvoiceStatus status, bool? receiptEnabled, bool? showPayments) =>
             status == InvoiceStatus.Settled && receiptEnabled is true && showPayments is not false;
 
-        internal static string SanitizeMerchantText(string raw)
+        internal static string SanitizeMerchantText(string text)
         {
-            var text = raw.Length > 4000 ? raw[..4000] : raw;
-            text = text.Normalize(NormalizationForm.FormKC);
-            text = new string(text.Where(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t').ToArray());
-            text = text.Replace("\r\n", "\n").Replace("\r", "\n");
-            var lines = text.Split('\n')
-                .Where(l => !l.Replace(" ", "").ToLowerInvariant().StartsWith("receiptsigningkey"))
-                .Select(l => "> " + l)
-                .ToList();
-            return string.Join("\n", lines).TrimEnd();
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            if (text.Length > 4000) text = text[..4000];
+            var lines = text.Split('\n');
+            var kept = new List<string>();
+            foreach (var line in lines)
+            {
+                var key = new string(
+                    line.Normalize(NormalizationForm.FormKC)
+                        .ToLowerInvariant()
+                        .Where(c => c >= 'a' && c <= 'z')
+                        .ToArray());
+                if (key.Contains("receiptsigningkey")) continue;
+                kept.Add("> " + line);
+            }
+            return string.Join("\n", kept);
         }
 
         internal static List<NostrEventTag> BuildOfferTags(
