@@ -41,15 +41,21 @@ namespace BTCPayServer.Plugins.AgentCheckout
                 return cached;
             if (!await _storeExistenceChecker.ExistsAsync(storeId))
                 return new AgentCheckoutSettings { Enabled = false };
-            return await _memoryCache.GetOrCreateAsync(cacheKey, async _ =>
-                await _storeRepository.GetSettingAsync<AgentCheckoutSettings>(storeId, nameof(AgentCheckoutSettings))
-                ?? new AgentCheckoutSettings()) ?? new AgentCheckoutSettings();
+            return await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                entry.SlidingExpiration = TimeSpan.FromMinutes(10);
+                return await _storeRepository.GetSettingAsync<AgentCheckoutSettings>(storeId, nameof(AgentCheckoutSettings))
+                    ?? new AgentCheckoutSettings();
+            }) ?? new AgentCheckoutSettings();
         }
 
         public async Task UpdateSettings(string storeId, AgentCheckoutSettings settings)
         {
             await _storeRepository.UpdateSetting(storeId, nameof(AgentCheckoutSettings), settings);
-            _memoryCache.Set(CacheKey(storeId), settings);
+            _memoryCache.Set(CacheKey(storeId), settings, new MemoryCacheEntryOptions
+            {
+                SlidingExpiration = TimeSpan.FromMinutes(10)
+            });
         }
 
         public async Task<ECPrivKey?> GetOrCreateReceiptKey(string storeId)
