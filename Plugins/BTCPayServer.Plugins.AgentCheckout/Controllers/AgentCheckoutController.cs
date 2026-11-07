@@ -1,18 +1,25 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Payments;
+using BTCPayServer.Payments.Bitcoin;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using NNostr.Client;
+using NNostr.Client.Protocols;
 
 namespace BTCPayServer.Plugins.AgentCheckout.Controllers
 {
@@ -26,17 +33,20 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         private readonly Dictionary<PaymentMethodId, IPaymentLinkExtension> _paymentLinkExtensions;
         private readonly AgentCheckoutService _agentCheckoutService;
         private readonly PaymentMethodHandlerDictionary _handlers;
+        private readonly IMemoryCache _memoryCache;
 
         public AgentCheckoutController(
             InvoiceRepository invoiceRepository,
             Dictionary<PaymentMethodId, IPaymentLinkExtension> paymentLinkExtensions,
             AgentCheckoutService agentCheckoutService,
-            PaymentMethodHandlerDictionary handlers)
+            PaymentMethodHandlerDictionary handlers,
+            IMemoryCache memoryCache)
         {
             _invoiceRepository = invoiceRepository;
             _paymentLinkExtensions = paymentLinkExtensions;
             _agentCheckoutService = agentCheckoutService;
             _handlers = handlers;
+            _memoryCache = memoryCache;
         }
 
         [HttpGet("/stores/{storeId}/llms.txt")]
@@ -46,7 +56,9 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             if (!settings.Enabled)
                 return NotFound();
 
-            var content = BuildLlmsTxt();
+            var key = await _agentCheckoutService.GetOrCreateReceiptKey(storeId);
+            var npub = AgentCheckoutService.GetReceiptNpub(key);
+            var content = BuildLlmsTxt(npub);
             if (!string.IsNullOrWhiteSpace(settings.LlmsTxtAppend))
                 content += "\n" + settings.LlmsTxtAppend.Trim() + "\n";
 
@@ -56,17 +68,20 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         [HttpGet("/llms.txt")]
         public IActionResult GetLlmsTxt()
         {
-            return Content(BuildLlmsTxt(), "text/plain; charset=utf-8");
+            return Content(BuildLlmsTxt(null), "text/plain; charset=utf-8");
         }
 
-        private static string BuildLlmsTxt()
+        private static string BuildLlmsTxt(string? receiptNpub)
         {
+            var receiptKeyLine = receiptNpub != null
+                ? $"\nReceipt signing key: {receiptNpub}\n"
+                : "";
             return $@"# BTCPay Server Agent Checkout
 
 > BTCPay Server lets LLM agents pay Bitcoin Lightning or on-chain invoices without authentication. Extract the invoiceId, request a quote, pay the returned URI, and poll for settlement.
 
 All paths are relative to the origin this file was served from.
-
+{receiptKeyLine}
 Use these instructions only for invoices the user explicitly asked you to pay. Do not submit a payment without user intent and access to a wallet controlled by the user or agent.
 
 Extract the `invoiceId` from a checkout URL like `/i/{{invoiceId}}`.
@@ -95,7 +110,16 @@ Response format:
   ""btcAmount"": 1400,
   ""currency"": ""BTC"",
   ""quoteExpiresAt"": ""2026-08-25T12:00:00Z"",
-  ""paymentHash"": ""a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6""
+  ""paymentHash"": ""a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"",
+  ""offer"": {{
+    ""kind"": 1402,
+    ""pubkey"": ""<merchant receipt pubkey hex>"",
+    ""created_at"": 1762480000,
+    ""content"": """",
+    ""tags"": [[""invoice"", ""...""], [""amount"", ""140000""], [""method"", ""LIGHTNING""], [""bolt11"", ""lnbc...""], [""payment_hash"", ""...""], [""quote"", ""...""], [""valid_until"", ""...""], [""store"", ""...""]],
+    ""id"": ""<event id>"",
+    ""sig"": ""<schnorr sig>""
+  }}
 }}
 ```
 
@@ -103,6 +127,9 @@ Response format:
 `paymentUrl` is the URI to pass to a compatible wallet. `btcAmount` is in satoshis.
 `quoteExpiresAt` is when the invoice expires. Do not pay after this time.
 `paymentHash` is the Lightning payment hash (hex) when the method is LIGHTNING, otherwise null. Your wallet returns the matching preimage after paying; keep it as proof of payment.
+`offer` is a Nostr kind 1402 event signed by the merchant. Verify its signature and that `pubkey` matches the receipt signing key shown above before paying.
+
+To verify the offer: check that `sig` is a valid Schnorr signature over `id`, which is the SHA256 of the serialized event. Verify that `pubkey` equals the receipt signing key shown in this file. Verify that `valid_until` is in the future. For Lightning, verify that `bolt11` decodes to the same `payment_hash`.
 
 After paying, check the invoice status:
 
@@ -136,6 +163,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
 
 - [Create Quote](/api/v1/agent/checkout/create-quote): Request a Lightning or Bitcoin quote for an existing invoice.
 - [Order Status](/api/v1/agent/checkout/order-status): Check whether an invoice is paid, processing, or pending.
+- [Receipt](/api/v1/agent/checkout/receipt): Retrieve a signed Nostr receipt for an invoice.
 ";
         }
 
@@ -191,7 +219,6 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             }
             else
             {
-                // auto: prefer Lightning, fall back to on-chain
                 if (settings.AllowLightning && prompts.TryGetValue(lnPmId, out selectedPrompt) && selectedPrompt?.Activated == true)
                     method = "LIGHTNING";
                 else if (settings.AllowOnChain && prompts.TryGetValue(btcPmId, out selectedPrompt) && selectedPrompt?.Activated == true)
@@ -215,6 +242,55 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             var quoteId = ComputeQuoteId(request.InvoiceId, method);
             var paymentHash = method == "LIGHTNING" ? GetLightningPaymentHash(invoice) : null;
 
+            var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
+            var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}";
+            var signedOffer = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                entry.AbsoluteExpiration = invoice.ExpirationTime;
+                var amountMsat = (long)(accounting.Due * 100_000_000_000m);
+                var tags = new List<NostrEventTag>
+                {
+                    new() { TagIdentifier = "invoice", Data = new() { request.InvoiceId } },
+                    new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } },
+                    new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } },
+                    new() { TagIdentifier = "method", Data = new() { method } }
+                };
+                if (method == "LIGHTNING" && !string.IsNullOrEmpty(paymentUrl))
+                {
+                    var bolt11 = paymentUrl.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)
+                        ? paymentUrl[10..]
+                        : paymentUrl;
+                    tags.Add(new() { TagIdentifier = "bolt11", Data = new() { bolt11 } });
+                    if (paymentHash != null)
+                        tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
+                }
+                else if (method == "BITCOIN" && !string.IsNullOrEmpty(selectedPrompt.Destination))
+                {
+                    tags.Add(new() { TagIdentifier = "address", Data = new() { selectedPrompt.Destination } });
+                }
+                tags.Add(new() { TagIdentifier = "quote", Data = new() { quoteId } });
+                tags.Add(new() { TagIdentifier = "valid_until", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
+                tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
+                var evt = new NostrEvent { Kind = 1402, Content = "", Tags = tags };
+                return await evt.ComputeIdAndSignAsync(receiptKey);
+            });
+
+            var offerIdsKey = $"agco_offer_ids_{request.InvoiceId}";
+            var offerIds = _memoryCache.GetOrCreate(offerIdsKey, entry =>
+            {
+                entry.AbsoluteExpiration = invoice.ExpirationTime.AddDays(7);
+                return new List<string>();
+            })!;
+            if (signedOffer?.Id != null)
+                lock (offerIds) { if (!offerIds.Contains(signedOffer.Id)) offerIds.Add(signedOffer.Id); }
+
+            JObject? offerJObject = null;
+            if (signedOffer != null)
+            {
+                var offerStr = System.Text.Json.JsonSerializer.Serialize(signedOffer);
+                offerJObject = JObject.Parse(offerStr);
+            }
+
             return Ok(new CreateQuoteResponse(
                 quoteId,
                 method,
@@ -222,7 +298,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 btcAmountSats,
                 "BTC",
                 invoice.ExpirationTime,
-                paymentHash));
+                paymentHash,
+                offerJObject));
         }
 
         [HttpPost("/api/v1/agent/checkout/order-status")]
@@ -340,7 +417,10 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         [JsonProperty("paymentHash")]
         public string? PaymentHash { get; }
 
-        public CreateQuoteResponse(string quoteId, string method, string paymentUrl, long btcAmount, string currency, DateTimeOffset quoteExpiresAt, string? paymentHash)
+        [JsonProperty("offer")]
+        public JObject? Offer { get; }
+
+        public CreateQuoteResponse(string quoteId, string method, string paymentUrl, long btcAmount, string currency, DateTimeOffset quoteExpiresAt, string? paymentHash, JObject? offer)
         {
             QuoteId = quoteId;
             Method = method;
@@ -349,6 +429,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             Currency = currency;
             QuoteExpiresAt = quoteExpiresAt;
             PaymentHash = paymentHash;
+            Offer = offer;
         }
     }
 
