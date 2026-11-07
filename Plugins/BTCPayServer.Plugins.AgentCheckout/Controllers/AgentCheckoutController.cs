@@ -27,6 +27,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
     [AllowAnonymous]
     [IgnoreAntiforgeryToken]
     [EnableCors(CorsPolicies.All)]
+    [TypeFilter(typeof(AgentCheckoutExceptionFilter))]
     public class AgentCheckoutController : ControllerBase
     {
         private readonly InvoiceRepository _invoiceRepository;
