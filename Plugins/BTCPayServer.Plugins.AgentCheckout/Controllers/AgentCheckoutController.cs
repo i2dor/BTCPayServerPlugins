@@ -243,7 +243,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             var paymentHash = method == "LIGHTNING" ? GetLightningPaymentHash(invoice) : null;
 
             var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
-            var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}";
+            var amountMsatForKey = (long)(accounting.Due * 100_000_000_000m);
+            var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}_{amountMsatForKey}";
             var signedOffer = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
             {
                 entry.AbsoluteExpiration = invoice.ExpirationTime;
