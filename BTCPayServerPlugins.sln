@@ -87,6 +87,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.LNURLV
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.LNURLVerify.Tests", "BTCPayServer.Plugins.LNURLVerify.Tests\BTCPayServer.Plugins.LNURLVerify.Tests.csproj", "{E425184D-4DE1-4BC7-B17F-9F9749CE1AC0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.AgentCheckout.Tests", "Plugins\BTCPayServer.Plugins.AgentCheckout.Tests\BTCPayServer.Plugins.AgentCheckout.Tests.csproj", "{48983037-CEC5-41E4-A98A-BCDE13F4AC18}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -1015,6 +1017,30 @@ Global
 		{E425184D-4DE1-4BC7-B17F-9F9749CE1AC0}.Altcoins-Release|x64.Build.0 = Debug|Any CPU
 		{E425184D-4DE1-4BC7-B17F-9F9749CE1AC0}.Altcoins-Release|x86.ActiveCfg = Debug|Any CPU
 		{E425184D-4DE1-4BC7-B17F-9F9749CE1AC0}.Altcoins-Release|x86.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Debug|x64.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Debug|x86.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Release|Any CPU.Build.0 = Release|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Release|x64.ActiveCfg = Release|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Release|x64.Build.0 = Release|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Release|x86.ActiveCfg = Release|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Release|x86.Build.0 = Release|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Debug|x64.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Debug|x64.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Debug|x86.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Debug|x86.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Release|Any CPU.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Release|x64.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Release|x64.Build.0 = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Release|x86.ActiveCfg = Debug|Any CPU
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18}.Altcoins-Release|x86.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -1034,5 +1060,6 @@ Global
 		{E4A1B2C3-D5E6-7F8A-9B0C-1D2E3F4A5B6C} = {07D57EEB-2F50-60C4-C011-FE4FA775C9A8}
 		{1A5467C8-FED2-4A7F-9EBB-571B49CC183A} = {07D57EEB-2F50-60C4-C011-FE4FA775C9A8}
 		{9468B81B-1585-4C5F-995D-719F7C388D74} = {07D57EEB-2F50-60C4-C011-FE4FA775C9A8}
+		{48983037-CEC5-41E4-A98A-BCDE13F4AC18} = {07D57EEB-2F50-60C4-C011-FE4FA775C9A8}
 	EndGlobalSection
 EndGlobal
