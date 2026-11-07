@@ -546,13 +546,13 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             return addr.ToString();
         }
 
-        internal static bool IsValidStoreId(string id) =>
-            id.Length >= 10 && id.Length <= 64 &&
-            id.All(c => char.IsLetterOrDigit(c) || c == '-' || c == '_');
+        internal static bool IsValidStoreId(string? id) =>
+            id is { Length: >= 1 and <= 64 } &&
+            id.All(c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
 
-        internal static bool IsValidInvoiceId(string id) =>
-            id.Length >= 10 && id.Length <= 64 &&
-            id.All(c => char.IsLetterOrDigit(c) || c == '-' || c == '_');
+        internal static bool IsValidInvoiceId(string? id) =>
+            id is { Length: >= 1 and <= 64 } &&
+            id.All(c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
 
         internal static bool IsQuotable(InvoiceStatus status) => status == InvoiceStatus.New;
 

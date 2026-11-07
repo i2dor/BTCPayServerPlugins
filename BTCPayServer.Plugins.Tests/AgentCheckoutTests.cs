@@ -49,11 +49,12 @@ public class AgentCheckoutTests
 
     [Theory]
     [InlineData("")]
-    [InlineData("short")]
     [InlineData("contains spaces here")]
     [InlineData("has/slash")]
     [InlineData("has..dotdot")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("ăbc")]
+    [InlineData("abc-def")]
     public void IsValidStoreId_RejectsInvalidFormats(string id)
     {
         Assert.False(AgentCheckoutController.IsValidStoreId(id));
@@ -62,6 +63,7 @@ public class AgentCheckoutTests
     [Theory]
     [InlineData("ValidStoreId1234")]
     [InlineData("ABCD1234efgh5678")]
+    [InlineData("HAucTGdnoKwfNjy7iySQSNp2wpU6rvPbDU3KanLuhJFD")]
     public void IsValidStoreId_AcceptsValidFormats(string id)
     {
         Assert.True(AgentCheckoutController.IsValidStoreId(id));
@@ -69,10 +71,11 @@ public class AgentCheckoutTests
 
     [Theory]
     [InlineData("")]
-    [InlineData("short")]
     [InlineData("has a space")]
     [InlineData("has/slash")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("ăbc")]
+    [InlineData("abc-def")]
     public void IsValidInvoiceId_RejectsInvalidFormats(string id)
     {
         Assert.False(AgentCheckoutController.IsValidInvoiceId(id));
