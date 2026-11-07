@@ -57,6 +57,8 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
                 return NotFound();
 
             var key = await _agentCheckoutService.GetOrCreateReceiptKey(storeId);
+            if (key is null)
+                return NotFound();
             var npub = AgentCheckoutService.GetReceiptNpub(key);
             var content = BuildLlmsTxt(npub);
             if (!string.IsNullOrWhiteSpace(settings.LlmsTxtAppend))
@@ -247,37 +249,41 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
 
             var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
             var amountMsatForKey = (long)(accounting.Due * 100_000_000_000m);
-            var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}_{amountMsatForKey}";
-            var signedOffer = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            NostrEvent? signedOffer = null;
+            if (receiptKey is not null)
             {
-                entry.AbsoluteExpiration = invoice.ExpirationTime;
-                var amountMsat = (long)(accounting.Due * 100_000_000_000m);
-                var tags = new List<NostrEventTag>
+                var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}_{amountMsatForKey}";
+                signedOffer = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
                 {
-                    new() { TagIdentifier = "invoice", Data = new() { request.InvoiceId } },
-                    new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } },
-                    new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } },
-                    new() { TagIdentifier = "method", Data = new() { method } }
-                };
-                if (method == "LIGHTNING" && !string.IsNullOrEmpty(paymentUrl))
-                {
-                    var bolt11 = paymentUrl.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)
-                        ? paymentUrl[10..]
-                        : paymentUrl;
-                    tags.Add(new() { TagIdentifier = "bolt11", Data = new() { bolt11 } });
-                    if (paymentHash != null)
-                        tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
-                }
-                else if (method == "BITCOIN" && !string.IsNullOrEmpty(selectedPrompt.Destination))
-                {
-                    tags.Add(new() { TagIdentifier = "address", Data = new() { selectedPrompt.Destination } });
-                }
-                tags.Add(new() { TagIdentifier = "quote", Data = new() { quoteId } });
-                tags.Add(new() { TagIdentifier = "valid_until", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
-                tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
-                var evt = new NostrEvent { Kind = 1402, Content = "", Tags = tags };
-                return await evt.ComputeIdAndSignAsync(receiptKey);
-            });
+                    entry.AbsoluteExpiration = invoice.ExpirationTime;
+                    var amountMsat = (long)(accounting.Due * 100_000_000_000m);
+                    var tags = new List<NostrEventTag>
+                    {
+                        new() { TagIdentifier = "invoice", Data = new() { request.InvoiceId } },
+                        new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } },
+                        new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } },
+                        new() { TagIdentifier = "method", Data = new() { method } }
+                    };
+                    if (method == "LIGHTNING" && !string.IsNullOrEmpty(paymentUrl))
+                    {
+                        var bolt11 = paymentUrl.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)
+                            ? paymentUrl[10..]
+                            : paymentUrl;
+                        tags.Add(new() { TagIdentifier = "bolt11", Data = new() { bolt11 } });
+                        if (paymentHash != null)
+                            tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
+                    }
+                    else if (method == "BITCOIN" && !string.IsNullOrEmpty(selectedPrompt.Destination))
+                    {
+                        tags.Add(new() { TagIdentifier = "address", Data = new() { selectedPrompt.Destination } });
+                    }
+                    tags.Add(new() { TagIdentifier = "quote", Data = new() { quoteId } });
+                    tags.Add(new() { TagIdentifier = "valid_until", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
+                    tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
+                    var evt = new NostrEvent { Kind = 1402, Content = "", Tags = tags };
+                    return await evt.ComputeIdAndSignAsync(receiptKey!);
+                });
+            }
 
             var offerIdsKey = $"agco_offer_ids_{request.InvoiceId}";
             var offerIds = _memoryCache.GetOrCreate(offerIdsKey, entry =>
@@ -437,6 +443,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             }
 
             var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
+            if (receiptKey is null)
+                return StatusCode(503, new ErrorResponse("receipt-key-unavailable", "Receipt signing key is not available."));
             var pubKeyHex = AgentCheckoutService.GetReceiptPubKeyHex(receiptKey);
             var npub = AgentCheckoutService.GetReceiptNpub(receiptKey);
 

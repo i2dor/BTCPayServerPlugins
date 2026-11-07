@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBitcoin.Secp256k1;
 using NNostr.Client;
@@ -17,18 +18,30 @@ namespace BTCPayServer.Plugins.AgentCheckout
     {
         private readonly IStoreRepository _storeRepository;
         private readonly IMemoryCache _memoryCache;
+        private readonly IStoreExistenceChecker _storeExistenceChecker;
+        private readonly ILogger<AgentCheckoutService> _logger;
         private readonly SemaphoreSlim _keyCreationLock = new(1, 1);
 
-        public AgentCheckoutService(IStoreRepository storeRepository, IMemoryCache memoryCache)
+        public AgentCheckoutService(
+            IStoreRepository storeRepository,
+            IMemoryCache memoryCache,
+            IStoreExistenceChecker storeExistenceChecker,
+            ILogger<AgentCheckoutService> logger)
         {
             _storeRepository = storeRepository;
             _memoryCache = memoryCache;
+            _storeExistenceChecker = storeExistenceChecker;
+            _logger = logger;
         }
 
         public async Task<AgentCheckoutSettings> GetSettings(string storeId)
         {
-            var key = CacheKey(storeId);
-            return await _memoryCache.GetOrCreateAsync(key, async _ =>
+            var cacheKey = CacheKey(storeId);
+            if (_memoryCache.TryGetValue(cacheKey, out AgentCheckoutSettings? cached) && cached != null)
+                return cached;
+            if (!await _storeExistenceChecker.ExistsAsync(storeId))
+                return new AgentCheckoutSettings { Enabled = false };
+            return await _memoryCache.GetOrCreateAsync(cacheKey, async _ =>
                 await _storeRepository.GetSettingAsync<AgentCheckoutSettings>(storeId, nameof(AgentCheckoutSettings))
                 ?? new AgentCheckoutSettings()) ?? new AgentCheckoutSettings();
         }
@@ -39,8 +52,10 @@ namespace BTCPayServer.Plugins.AgentCheckout
             _memoryCache.Set(CacheKey(storeId), settings);
         }
 
-        public async Task<ECPrivKey> GetOrCreateReceiptKey(string storeId)
+        public async Task<ECPrivKey?> GetOrCreateReceiptKey(string storeId)
         {
+            if (!await _storeExistenceChecker.ExistsAsync(storeId))
+                return null;
             var settings = await GetSettings(storeId);
             if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
                 return NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
@@ -54,6 +69,11 @@ namespace BTCPayServer.Plugins.AgentCheckout
                 settings.ReceiptPrivateKeyHex = key.ToHex();
                 await UpdateSettings(storeId, settings);
                 return key;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create receipt key for store {StoreId}", storeId);
+                return null;
             }
             finally { _keyCreationLock.Release(); }
         }

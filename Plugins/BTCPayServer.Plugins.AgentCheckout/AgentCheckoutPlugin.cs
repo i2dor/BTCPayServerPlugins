@@ -13,6 +13,7 @@ namespace BTCPayServer.Plugins.AgentCheckout
 
         public override void Execute(IServiceCollection services)
         {
+            services.AddSingleton<IStoreExistenceChecker, StoreRepositoryExistenceChecker>();
             services.AddSingleton<AgentCheckoutService>();
             services.AddUIExtension("store-integrations-nav", "AgentCheckout/AgentCheckoutNav");
             base.Execute(services);

@@ -1,7 +1,10 @@
 #nullable enable
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.AgentCheckout;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using NBitcoin;
 using NBitcoin.Secp256k1;
 using NNostr.Client;
@@ -73,5 +76,32 @@ public class AgentCheckoutTests
         var receipt = new NostrEvent { Kind = 31402, Content = "", Tags = receiptTags };
         var signedReceipt = await receipt.ComputeIdAndSignAsync(key);
         Assert.DoesNotContain(signedReceipt.Tags, t => t.TagIdentifier == "preimage");
+    }
+
+    [Fact]
+    public async Task GetOrCreateReceiptKey_UnknownStore_ReturnsNull()
+    {
+        var service = new AgentCheckoutService(
+            new StubStoreRepository(),
+            new MemoryCache(new MemoryCacheOptions()),
+            new AlwaysAbsentChecker(),
+            NullLogger<AgentCheckoutService>.Instance);
+        var key = await service.GetOrCreateReceiptKey("nonexistent-store-id");
+        Assert.Null(key);
+    }
+
+    private sealed class StubStoreRepository : IStoreRepository
+    {
+        public Task<T?> GetSettingAsync<T>(string storeId, string name) where T : class =>
+            Task.FromResult<T?>(null);
+        public Task<Dictionary<string, T?>> GetSettingsAsync<T>(string name) where T : class =>
+            Task.FromResult(new Dictionary<string, T?>());
+        public Task UpdateSetting<T>(string storeId, string name, T obj) where T : class =>
+            Task.CompletedTask;
+    }
+
+    private sealed class AlwaysAbsentChecker : IStoreExistenceChecker
+    {
+        public Task<bool> ExistsAsync(string storeId) => Task.FromResult(false);
     }
 }
