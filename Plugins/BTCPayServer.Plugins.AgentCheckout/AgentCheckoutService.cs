@@ -20,7 +20,6 @@ namespace BTCPayServer.Plugins.AgentCheckout
         private readonly IMemoryCache _memoryCache;
         private readonly IStoreExistenceChecker _storeExistenceChecker;
         private readonly ILogger<AgentCheckoutService> _logger;
-        private readonly SemaphoreSlim _keyCreationLock = new(1, 1);
 
         public AgentCheckoutService(
             IStoreRepository storeRepository,
@@ -71,40 +70,6 @@ namespace BTCPayServer.Plugins.AgentCheckout
                 _logger.LogWarning(ex, "Failed to parse receipt key for store {StoreId}", storeId);
                 return null;
             }
-        }
-
-        public async Task<ECPrivKey?> GetOrCreateReceiptKey(string storeId)
-        {
-            if (!await _storeExistenceChecker.ExistsAsync(storeId))
-                return null;
-            var settings = await GetSettings(storeId);
-            if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
-                return NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
-            await _keyCreationLock.WaitAsync();
-            try
-            {
-                settings = await GetSettings(storeId);
-                if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
-                    return NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
-                var key = ECPrivKey.Create(RandomUtils.GetBytes(32));
-                var updated = new AgentCheckoutSettings
-                {
-                    Enabled = settings.Enabled,
-                    AllowLightning = settings.AllowLightning,
-                    AllowOnChain = settings.AllowOnChain,
-                    RateLimitPerMinute = settings.RateLimitPerMinute,
-                    LlmsTxtAppend = settings.LlmsTxtAppend,
-                    ReceiptPrivateKeyHex = key.ToHex()
-                };
-                await UpdateSettings(storeId, updated);
-                return key;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to create receipt key for store {StoreId}", storeId);
-                return null;
-            }
-            finally { _keyCreationLock.Release(); }
         }
 
         public static string GetReceiptPubKeyHex(ECPrivKey key) =>

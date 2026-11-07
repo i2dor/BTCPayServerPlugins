@@ -29,15 +29,9 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         public async Task<IActionResult> UpdateSettings(string storeId)
         {
             var settings = await _service.GetSettings(storeId);
-            if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
-            {
-                try
-                {
-                    var key = NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
-                    ViewBag.ReceiptNpub = AgentCheckoutService.GetReceiptNpub(key);
-                }
-                catch { }
-            }
+            var key = await _service.GetReceiptKey(storeId);
+            if (key != null)
+                ViewBag.ReceiptNpub = AgentCheckoutService.GetReceiptNpub(key);
             return View(settings);
         }
 
@@ -50,10 +44,14 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
                 return RedirectToAction(nameof(UpdateSettings), new { storeId });
             }
 
+            settings.OptedIn = settings.Enabled;
+            settings.RateLimitPerMinute = Math.Clamp(settings.RateLimitPerMinute, 1, 300);
+
             if (keyAction == "generate")
             {
-                var newKey = ECPrivKey.Create(RandomUtils.GetBytes(32));
-                settings.ReceiptPrivateKeyHex = newKey.ToHex();
+                await CreateAndStoreReceiptKeyAsync(storeId, settings);
+                TempData[WellKnownTempData.SuccessMessage] = "Agent Checkout settings saved.";
+                return RedirectToAction(nameof(UpdateSettings), new { storeId });
             }
             else if (!string.IsNullOrWhiteSpace(importReceiptKey))
             {
@@ -79,10 +77,16 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
                 settings.ReceiptPrivateKeyHex = existing.ReceiptPrivateKeyHex;
             }
 
-            settings.RateLimitPerMinute = Math.Clamp(settings.RateLimitPerMinute, 1, 300);
             await _service.UpdateSettings(storeId, settings);
             TempData[WellKnownTempData.SuccessMessage] = "Agent Checkout settings saved.";
             return RedirectToAction(nameof(UpdateSettings), new { storeId });
+        }
+
+        private async Task CreateAndStoreReceiptKeyAsync(string storeId, AgentCheckoutSettings settings)
+        {
+            var key = ECPrivKey.Create(RandomUtils.GetBytes(32));
+            settings.ReceiptPrivateKeyHex = key.ToHex();
+            await _service.UpdateSettings(storeId, settings);
         }
     }
 }
