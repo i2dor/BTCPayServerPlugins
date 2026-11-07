@@ -76,6 +76,9 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             var receiptKeyLine = receiptNpub != null
                 ? $"\nReceipt signing key: {receiptNpub}\n"
                 : "";
+            var offerPubkeyNote = receiptNpub != null
+                ? "Verify its signature and that `pubkey` matches the receipt signing key shown above before paying."
+                : "Verify its signature before paying. The merchant receipt signing key is listed in /stores/{storeId}/llms.txt; the store id is in the offer's store tag. Verify that the offer pubkey matches it.";
             return $@"# BTCPay Server Agent Checkout
 
 > BTCPay Server lets LLM agents pay Bitcoin Lightning or on-chain invoices without authentication. Extract the invoiceId, request a quote, pay the returned URI, and poll for settlement.
@@ -127,9 +130,9 @@ Response format:
 `paymentUrl` is the URI to pass to a compatible wallet. `btcAmount` is in satoshis.
 `quoteExpiresAt` is when the invoice expires. Do not pay after this time.
 `paymentHash` is the Lightning payment hash (hex) when the method is LIGHTNING, otherwise null. Your wallet returns the matching preimage after paying; keep it as proof of payment.
-`offer` is a Nostr kind 1402 event signed by the merchant. Verify its signature and that `pubkey` matches the receipt signing key shown above before paying.
+`offer` is a Nostr kind 1402 event signed by the merchant. {offerPubkeyNote}
 
-To verify the offer: check that `sig` is a valid Schnorr signature over `id`, which is the SHA256 of the serialized event. Verify that `pubkey` equals the receipt signing key shown in this file. Verify that `valid_until` is in the future. For Lightning, verify that `bolt11` decodes to the same `payment_hash`.
+To verify the offer: check that `sig` is a valid Schnorr signature over `id`, which is the SHA256 of the serialized event. Verify that `valid_until` is in the future. For Lightning, verify that `bolt11` decodes to the same `payment_hash`.
 
 After paying, check the invoice status:
 
