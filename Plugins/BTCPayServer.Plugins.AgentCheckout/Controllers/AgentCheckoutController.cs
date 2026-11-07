@@ -10,10 +10,12 @@ using System.Text;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Bitcoin;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Services.Invoices;
+using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -37,19 +39,22 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         private readonly AgentCheckoutService _agentCheckoutService;
         private readonly PaymentMethodHandlerDictionary _handlers;
         private readonly IMemoryCache _memoryCache;
+        private readonly StoreRepository _storeRepository;
 
         public AgentCheckoutController(
             InvoiceRepository invoiceRepository,
             Dictionary<PaymentMethodId, IPaymentLinkExtension> paymentLinkExtensions,
             AgentCheckoutService agentCheckoutService,
             PaymentMethodHandlerDictionary handlers,
-            IMemoryCache memoryCache)
+            IMemoryCache memoryCache,
+            StoreRepository storeRepository)
         {
             _invoiceRepository = invoiceRepository;
             _paymentLinkExtensions = paymentLinkExtensions;
             _agentCheckoutService = agentCheckoutService;
             _handlers = handlers;
             _memoryCache = memoryCache;
+            _storeRepository = storeRepository;
         }
 
         [HttpGet("/stores/{storeId}/llms.txt")]
@@ -444,8 +449,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
                 return RateLimited();
 
-            // TODO: check invoice.ReceiptOptions (merged with store blob) and omit txid/paid_at when ShowPayments is false.
-            // Currently always included as a conservative default.
+            var store = await _storeRepository.GetStoreByInvoiceId(invoice.Id);
+            bool includeTxidAndPaidAt = false;
+            if (store != null)
+            {
+                var receiptOptions = InvoiceDataBase.ReceiptOptions.Merge(store.GetStoreBlob().ReceiptOptions, invoice.ReceiptOptions);
+                includeTxidAndPaidAt = receiptOptions.Enabled is true && receiptOptions.ShowPayments is not false;
+            }
+
             var lnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
             var btcPmId = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
             var prompts = invoice.GetPaymentPrompts();
@@ -530,10 +541,11 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             tags.Add(new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } });
             foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "method", Data = new() { m } });
             foreach (var ph in paymentHashes) tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { ph } });
-            foreach (var txid in txids) tags.Add(new() { TagIdentifier = "txid", Data = new() { txid } });
+            if (includeTxidAndPaidAt)
+                foreach (var txid in txids) tags.Add(new() { TagIdentifier = "txid", Data = new() { txid } });
             foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "quote", Data = new() { ComputeQuoteId(request.InvoiceId, m) } });
             tags.Add(new() { TagIdentifier = "quote_expires_at", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
-            if (paidAt.HasValue) tags.Add(new() { TagIdentifier = "paid_at", Data = new() { paidAt.Value.ToUnixTimeSeconds().ToString() } });
+            if (includeTxidAndPaidAt && paidAt.HasValue) tags.Add(new() { TagIdentifier = "paid_at", Data = new() { paidAt.Value.ToUnixTimeSeconds().ToString() } });
             if (paidMsat > 0 && paidMsat != amountMsat) tags.Add(new() { TagIdentifier = "paid", Data = new() { paidMsat.ToString() } });
             tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
 
