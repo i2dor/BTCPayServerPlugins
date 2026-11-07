@@ -327,6 +327,12 @@ IPv6 addresses are bucketed at /64, so the entire prefix counts as one client. T
 
 ---
 
+## Upgrading from 1.1.0
+
+After upgrading to 1.1.1, existing enabled stores require one explicit save in **Store Settings -> Integrations -> Agent Checkout** before the plugin becomes active again. This one-time opt-in prevents accidental activation on upgrade. The **Enable Agent Checkout** toggle and all other settings are preserved; click Save to confirm.
+
+---
+
 ## Development
 
 The plugin lives in `Plugins/BTCPayServer.Plugins.AgentCheckout/` inside [i2dor/BTCPayServerPlugins](https://github.com/i2dor/BTCPayServerPlugins).
