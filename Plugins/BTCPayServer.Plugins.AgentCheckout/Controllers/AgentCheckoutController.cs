@@ -216,6 +216,9 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (invoice.Status == InvoiceStatus.Settled)
                 return BadRequest(new ErrorResponse("invoice-already-paid", "The invoice has already been paid."));
 
+            if (invoice.ExpirationTime <= DateTimeOffset.UtcNow)
+                return StatusCode(409, new ErrorResponse("invoice-expired", "The invoice expiry time has passed."));
+
             var prompts = invoice.GetPaymentPrompts();
 
             var lnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
@@ -260,16 +263,20 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 return BadRequest(new ErrorResponse("payment-link-unavailable", "Payment link could not be generated. The invoice may not be activated yet."));
 
             var accounting = selectedPrompt.Calculate();
+            if (accounting.Due <= 0)
+                return StatusCode(409, new ErrorResponse("invoice-paid-or-no-due", "The invoice has no amount due."));
+
             var btcAmountSats = (long)(accounting.Due * 100_000_000m);
             var quoteId = ComputeQuoteId(request.InvoiceId, method);
             var paymentHash = method == "LIGHTNING" ? GetLightningPaymentHash(invoice) : null;
 
             var receiptKey = await _agentCheckoutService.GetReceiptKey(invoice.StoreId);
+            var signingPubKeyHex = receiptKey != null ? AgentCheckoutService.GetReceiptPubKeyHex(receiptKey) : "";
             var amountMsatForKey = (long)(accounting.Due * 100_000_000_000m);
             NostrEvent? signedOffer = null;
-            if (receiptKey is not null)
+            if (receiptKey is not null && amountMsatForKey > 0)
             {
-                var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}_{amountMsatForKey}";
+                var cacheKey = $"agco_offer_{request.InvoiceId}_{method}_{selectedPrompt.Destination}_{amountMsatForKey}_{signingPubKeyHex}";
                 signedOffer = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
                 {
                     entry.AbsoluteExpiration = invoice.ExpirationTime;
