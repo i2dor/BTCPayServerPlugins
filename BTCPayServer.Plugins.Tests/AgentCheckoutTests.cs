@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.AgentCheckout;
+using BTCPayServer.Plugins.AgentCheckout.Controllers;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using NBitcoin;
@@ -88,6 +89,44 @@ public class AgentCheckoutTests
             NullLogger<AgentCheckoutService>.Instance);
         var key = await service.GetOrCreateReceiptKey("nonexistent-store-id");
         Assert.Null(key);
+    }
+
+    [Fact]
+    public void DefaultSettings_AreDisabled()
+    {
+        var settings = new AgentCheckoutSettings();
+        Assert.False(settings.Enabled);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("short")]
+    [InlineData("contains spaces here")]
+    [InlineData("has/slash")]
+    [InlineData("has..dotdot")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void IsValidStoreId_RejectsInvalidFormats(string id)
+    {
+        Assert.False(AgentCheckoutController.IsValidStoreId(id));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("short")]
+    [InlineData("has a space")]
+    [InlineData("has/slash")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void IsValidInvoiceId_RejectsInvalidFormats(string id)
+    {
+        Assert.False(AgentCheckoutController.IsValidInvoiceId(id));
+    }
+
+    [Fact]
+    public void Ipv6_SamePrefixSharesBucket()
+    {
+        var a = AgentCheckoutController.GetRateLimitKey("2001:db8:1:2:3:4:5:6");
+        var b = AgentCheckoutController.GetRateLimitKey("2001:db8:1:2:ffff:ffff:ffff:ffff");
+        Assert.Equal(a, b);
     }
 
     private sealed class StubStoreRepository : IStoreRepository
