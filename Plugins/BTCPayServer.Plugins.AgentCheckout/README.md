@@ -42,7 +42,7 @@ All endpoints are public (no authentication required) and CORS-enabled.
 
 ### `GET /llms.txt`
 
-Returns global machine-readable payment instructions for any AI agent visiting this BTCPay instance. Contains API documentation, request/response shapes, and status values.
+Returns global machine-readable payment instructions for any AI agent visiting this BTCPay instance. Contains API documentation, request/response shapes, and status values. All paths in the file are root-relative so agents resolve them against the origin that served the file.
 
 ```
 GET https://btcpay.example.com/llms.txt

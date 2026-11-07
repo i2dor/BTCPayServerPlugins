@@ -8,7 +8,7 @@
   <PropertyGroup>
     <Product>Agent Checkout</Product>
     <Description>Exposes an LLM-readable /llms.txt and a public quote API so AI agents can pay BTCPay invoices via Lightning or on-chain Bitcoin without authentication.</Description>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 

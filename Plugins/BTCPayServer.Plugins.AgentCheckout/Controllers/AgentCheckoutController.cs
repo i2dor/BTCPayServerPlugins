@@ -46,7 +46,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             if (!settings.Enabled)
                 return NotFound();
 
-            var content = BuildLlmsTxt($"{Request.Scheme}://{Request.Host}");
+            var content = BuildLlmsTxt();
             if (!string.IsNullOrWhiteSpace(settings.LlmsTxtAppend))
                 content += "\n" + settings.LlmsTxtAppend.Trim() + "\n";
 
@@ -56,23 +56,25 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         [HttpGet("/llms.txt")]
         public IActionResult GetLlmsTxt()
         {
-            return Content(BuildLlmsTxt($"{Request.Scheme}://{Request.Host}"), "text/plain; charset=utf-8");
+            return Content(BuildLlmsTxt(), "text/plain; charset=utf-8");
         }
 
-        private string BuildLlmsTxt(string host)
+        private static string BuildLlmsTxt()
         {
             return $@"# BTCPay Server Agent Checkout
 
 > BTCPay Server lets LLM agents pay Bitcoin Lightning or on-chain invoices without authentication. Extract the invoiceId, request a quote, pay the returned URI, and poll for settlement.
 
+All paths are relative to the origin this file was served from.
+
 Use these instructions only for invoices the user explicitly asked you to pay. Do not submit a payment without user intent and access to a wallet controlled by the user or agent.
 
-Extract the `invoiceId` from a checkout URL like `{host}/i/{{invoiceId}}`.
+Extract the `invoiceId` from a checkout URL like `/i/{{invoiceId}}`.
 
 Create a quote before paying:
 
 ```http
-POST {host}/api/v1/agent/checkout/create-quote
+POST /api/v1/agent/checkout/create-quote
 Content-Type: application/json
 
 {{
@@ -105,7 +107,7 @@ Response format:
 After paying, check the invoice status:
 
 ```http
-POST {host}/api/v1/agent/checkout/order-status
+POST /api/v1/agent/checkout/order-status
 Content-Type: application/json
 
 {{
@@ -132,8 +134,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
 
 ## Resources
 
-- [Create Quote]({host}/api/v1/agent/checkout/create-quote): Request a Lightning or Bitcoin quote for an existing invoice.
-- [Order Status]({host}/api/v1/agent/checkout/order-status): Check whether an invoice is paid, processing, or pending.
+- [Create Quote](/api/v1/agent/checkout/create-quote): Request a Lightning or Bitcoin quote for an existing invoice.
+- [Order Status](/api/v1/agent/checkout/order-status): Check whether an invoice is paid, processing, or pending.
 ";
         }
 
