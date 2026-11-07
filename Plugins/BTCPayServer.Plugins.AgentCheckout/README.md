@@ -28,7 +28,7 @@ Navigate to **Store Settings -> Integrations -> Agent Checkout**.
 
 | Setting | Default | Description |
 |---|---|---|
-| Enable Agent Checkout | On | Master toggle. When off, all endpoints return 503 for invoices from this store. |
+| Enable Agent Checkout | Off | Master toggle. Must be turned on explicitly. When off, all endpoints return 503 for invoices from this store. |
 | Allow Lightning payments | On | Whether agents can request a BOLT11 Lightning invoice. |
 | Allow on-chain BTC | On | Whether agents can request an on-chain Bitcoin address. |
 | Rate limit (req/min per IP) | 30 | Max calls per IP per minute to the quote and status endpoints. Returns 429 when exceeded. |
