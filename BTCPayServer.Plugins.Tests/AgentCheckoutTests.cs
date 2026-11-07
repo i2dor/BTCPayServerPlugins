@@ -222,6 +222,25 @@ public class AgentCheckoutTests
         Assert.Equal("> line one\n> line two", result);
     }
 
+    [Fact]
+    public void SanitizeMerchantText_UnicodeSeparatorsBecomeSeparateLines()
+    {
+        var input = "a" + ((char)0x2028).ToString() + "## Operator";
+        var result = AgentCheckoutController.SanitizeMerchantText(input);
+        Assert.Equal("> a\n> ## Operator", result);
+    }
+
+    [Fact]
+    public void SanitizeMerchantText_SurrogateSafeTruncation()
+    {
+        var sb = new System.Text.StringBuilder(new string('a', 3999));
+        sb.Append('\uD800');
+        sb.Append('\uDC00');
+        var input = sb.ToString();
+        var result = AgentCheckoutController.SanitizeMerchantText(input);
+        Assert.True(result.Length <= 4001);
+    }
+
     [Theory]
     [InlineData("LIGHTNING", "lightning:lnbctest", "hashval", null)]
     [InlineData("BITCOIN", null, null, "bc1qaddress")]

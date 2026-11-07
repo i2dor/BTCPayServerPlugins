@@ -562,7 +562,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         internal static string SanitizeMerchantText(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-            if (text.Length > 4000) text = text[..4000];
+            if (text.Length > 4000)
+                text = char.IsHighSurrogate(text[3999]) ? text[..3999] : text[..4000];
+            text = text
+                .Replace("\u0085", "\n")
+                .Replace(((char)0x2028).ToString(), "\n")
+                .Replace(((char)0x2029).ToString(), "\n")
+                .Replace("\u000B", "\n")
+                .Replace("\u000C", "\n");
             var lines = text.Split('\n');
             var kept = new List<string>();
             foreach (var line in lines)
