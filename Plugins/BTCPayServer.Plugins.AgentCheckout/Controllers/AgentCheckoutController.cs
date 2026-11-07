@@ -425,7 +425,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
                 return RateLimited();
 
-            var store = await _storeRepository.GetStoreByInvoiceId(invoice.Id);
+            var store = await _storeRepository.FindStore(invoice.StoreId);
             bool includeTxidAndPaidAt = false;
             if (store != null)
             {
