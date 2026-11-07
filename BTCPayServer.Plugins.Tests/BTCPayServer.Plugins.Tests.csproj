@@ -6,7 +6,6 @@
         <Nullable>enable</Nullable>
 
         <IsPackable>false</IsPackable>
-        <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
     </PropertyGroup>
 
     <ItemGroup>
@@ -29,11 +28,6 @@
       <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.LNURLVerify\BTCPayServer.Plugins.LNURLVerify.csproj" />
       <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.AgentCheckout\BTCPayServer.Plugins.AgentCheckout.csproj" />
       <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer.Tests\BTCPayServer.Tests.csproj" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <Compile Remove="Electrum/**/*.cs" />
-      <Compile Remove="LNURLVerifyIntegrationTests.cs" />
     </ItemGroup>
 
 </Project>
