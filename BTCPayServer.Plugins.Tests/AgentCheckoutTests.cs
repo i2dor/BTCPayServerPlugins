@@ -129,6 +129,35 @@ public class AgentCheckoutTests
         Assert.Equal(a, b);
     }
 
+    [Fact]
+    public async Task GetReceiptKey_NoKeyStored_ReturnsNullWithoutWrite()
+    {
+        var repo = new CountingStoreRepository();
+        var service = new AgentCheckoutService(
+            repo,
+            new MemoryCache(new MemoryCacheOptions()),
+            new AlwaysPresentChecker(),
+            NullLogger<AgentCheckoutService>.Instance);
+        var key = await service.GetReceiptKey("ABCD1234efgh5678");
+        Assert.Null(key);
+        Assert.Equal(0, repo.UpdateCount);
+    }
+
+    [Fact]
+    public async Task GetOrCreateReceiptKey_SaveFailure_DoesNotCorruptCache()
+    {
+        var repo = new ThrowingOnWriteRepository();
+        var service = new AgentCheckoutService(
+            repo,
+            new MemoryCache(new MemoryCacheOptions()),
+            new AlwaysPresentChecker(),
+            NullLogger<AgentCheckoutService>.Instance);
+        var key = await service.GetOrCreateReceiptKey("ABCD1234efgh5678");
+        Assert.Null(key);
+        var settingsAfter = await service.GetSettings("ABCD1234efgh5678");
+        Assert.Null(settingsAfter.ReceiptPrivateKeyHex);
+    }
+
     private sealed class StubStoreRepository : IStoreRepository
     {
         public Task<T?> GetSettingAsync<T>(string storeId, string name) where T : class =>
@@ -139,8 +168,37 @@ public class AgentCheckoutTests
             Task.CompletedTask;
     }
 
+    private sealed class CountingStoreRepository : IStoreRepository
+    {
+        public int UpdateCount;
+        public Task<T?> GetSettingAsync<T>(string storeId, string name) where T : class =>
+            Task.FromResult<T?>(null);
+        public Task<Dictionary<string, T?>> GetSettingsAsync<T>(string name) where T : class =>
+            Task.FromResult(new Dictionary<string, T?>());
+        public Task UpdateSetting<T>(string storeId, string name, T obj) where T : class
+        {
+            System.Threading.Interlocked.Increment(ref UpdateCount);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingOnWriteRepository : IStoreRepository
+    {
+        public Task<T?> GetSettingAsync<T>(string storeId, string name) where T : class =>
+            Task.FromResult<T?>(null);
+        public Task<Dictionary<string, T?>> GetSettingsAsync<T>(string name) where T : class =>
+            Task.FromResult(new Dictionary<string, T?>());
+        public Task UpdateSetting<T>(string storeId, string name, T obj) where T : class =>
+            Task.FromException(new InvalidOperationException("DB unavailable"));
+    }
+
     private sealed class AlwaysAbsentChecker : IStoreExistenceChecker
     {
         public Task<bool> ExistsAsync(string storeId) => Task.FromResult(false);
+    }
+
+    private sealed class AlwaysPresentChecker : IStoreExistenceChecker
+    {
+        public Task<bool> ExistsAsync(string storeId) => Task.FromResult(true);
     }
 }
