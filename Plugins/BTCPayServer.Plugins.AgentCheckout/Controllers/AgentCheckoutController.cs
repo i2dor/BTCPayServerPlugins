@@ -136,6 +136,10 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (string.IsNullOrEmpty(request?.InvoiceId))
                 return BadRequest(new ErrorResponse("invoice-id-required", "invoiceId is required."));
 
+            var ip = ClientIp;
+            if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
+                return RateLimited();
+
             var invoice = await _invoiceRepository.GetInvoice(request.InvoiceId);
             if (invoice is null)
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
@@ -144,9 +148,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
 
-            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
-                return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
+                return RateLimited();
 
             if (invoice.Status == InvoiceStatus.Expired || invoice.Status == InvoiceStatus.Invalid)
                 return BadRequest(new ErrorResponse("invoice-expired", "The invoice is expired or invalid."));
@@ -217,6 +220,10 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (string.IsNullOrEmpty(request?.InvoiceId))
                 return BadRequest(new ErrorResponse("invoice-id-required", "invoiceId is required."));
 
+            var ip = ClientIp;
+            if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
+                return RateLimited();
+
             var invoice = await _invoiceRepository.GetInvoice(request.InvoiceId);
             if (invoice is null)
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
@@ -225,9 +232,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
 
-            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
-                return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
+                return RateLimited();
 
             var paymentStatus = invoice.Status switch
             {
@@ -258,6 +264,15 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 "UNKNOWN",
                 amountSats,
                 paidAt));
+        }
+
+        private string ClientIp =>
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        private IActionResult RateLimited()
+        {
+            Response.Headers["Retry-After"] = "60";
+            return StatusCode(429, new ErrorResponse("rate-limit-exceeded", "Too many requests. Try again later."));
         }
 
         private static string ComputeQuoteId(string invoiceId, string method)

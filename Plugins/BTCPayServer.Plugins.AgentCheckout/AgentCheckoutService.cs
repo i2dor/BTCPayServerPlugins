@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using Microsoft.Extensions.Caching.Memory;
@@ -31,19 +32,31 @@ namespace BTCPayServer.Plugins.AgentCheckout
             _memoryCache.Set(CacheKey(storeId), settings);
         }
 
+        // Limit per IP across all stores, checked before the invoice lookup so that
+        // requests with unknown invoice IDs are throttled as well. Equal to the highest
+        // value the settings page accepts, so the store limit still decides for real invoices.
+        public const int GlobalRateLimitPerMinute = 300;
+
+        public bool CheckGlobalRateLimit(string ip) =>
+            CheckRateLimit("global", ip, GlobalRateLimitPerMinute);
+
         public bool CheckRateLimit(string storeId, string ip, int limitPerMinute)
         {
             if (limitPerMinute <= 0) return true;
             var minute = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
             var key = $"ratelimit_{storeId}_{ip}_{minute}";
-            var count = _memoryCache.GetOrCreate(key, entry =>
+            // Atomic counter so concurrent requests cannot exceed the limit.
+            var counter = _memoryCache.GetOrCreate(key, entry =>
             {
-                entry.AbsoluteExpiration = DateTimeOffset.UtcNow.AddMinutes(2);
-                return 0;
-            });
-            count++;
-            _memoryCache.Set(key, count, DateTimeOffset.UtcNow.AddMinutes(2));
-            return count <= limitPerMinute;
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                return new RateCounter();
+            })!;
+            return Interlocked.Increment(ref counter.Count) <= limitPerMinute;
+        }
+
+        private sealed class RateCounter
+        {
+            public int Count;
         }
 
         private static string CacheKey(string storeId) =>
