@@ -57,7 +57,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             if (!settings.Enabled)
                 return NotFound();
 
-            var key = await _agentCheckoutService.GetOrCreateReceiptKey(storeId);
+            var key = await _agentCheckoutService.GetReceiptKey(storeId);
             if (key is null)
                 return NotFound();
             var npub = AgentCheckoutService.GetReceiptNpub(key);
@@ -248,7 +248,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             var quoteId = ComputeQuoteId(request.InvoiceId, method);
             var paymentHash = method == "LIGHTNING" ? GetLightningPaymentHash(invoice) : null;
 
-            var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
+            var receiptKey = await _agentCheckoutService.GetReceiptKey(invoice.StoreId);
             var amountMsatForKey = (long)(accounting.Due * 100_000_000_000m);
             NostrEvent? signedOffer = null;
             if (receiptKey is not null)
@@ -443,7 +443,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 paidMsat = (long)(acc.Paid * 100_000_000_000m);
             }
 
-            var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
+            var receiptKey = await _agentCheckoutService.GetReceiptKey(invoice.StoreId);
             if (receiptKey is null)
                 return StatusCode(503, new ErrorResponse("receipt-key-unavailable", "Receipt signing key is not available."));
             var pubKeyHex = AgentCheckoutService.GetReceiptPubKeyHex(receiptKey);

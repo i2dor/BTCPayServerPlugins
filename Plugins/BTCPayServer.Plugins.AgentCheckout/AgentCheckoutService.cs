@@ -58,6 +58,21 @@ namespace BTCPayServer.Plugins.AgentCheckout
             });
         }
 
+        public async Task<ECPrivKey?> GetReceiptKey(string storeId)
+        {
+            if (!await _storeExistenceChecker.ExistsAsync(storeId))
+                return null;
+            var settings = await GetSettings(storeId);
+            if (string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
+                return null;
+            try { return NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse receipt key for store {StoreId}", storeId);
+                return null;
+            }
+        }
+
         public async Task<ECPrivKey?> GetOrCreateReceiptKey(string storeId)
         {
             if (!await _storeExistenceChecker.ExistsAsync(storeId))
@@ -72,8 +87,16 @@ namespace BTCPayServer.Plugins.AgentCheckout
                 if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
                     return NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
                 var key = ECPrivKey.Create(RandomUtils.GetBytes(32));
-                settings.ReceiptPrivateKeyHex = key.ToHex();
-                await UpdateSettings(storeId, settings);
+                var updated = new AgentCheckoutSettings
+                {
+                    Enabled = settings.Enabled,
+                    AllowLightning = settings.AllowLightning,
+                    AllowOnChain = settings.AllowOnChain,
+                    RateLimitPerMinute = settings.RateLimitPerMinute,
+                    LlmsTxtAppend = settings.LlmsTxtAppend,
+                    ReceiptPrivateKeyHex = key.ToHex()
+                };
+                await UpdateSettings(storeId, updated);
                 return key;
             }
             catch (Exception ex)
