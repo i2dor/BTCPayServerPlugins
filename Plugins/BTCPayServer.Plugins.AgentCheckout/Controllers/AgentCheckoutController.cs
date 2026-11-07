@@ -567,13 +567,18 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             var kept = new List<string>();
             foreach (var line in lines)
             {
+                var stripped = new string(line.Where(c =>
+                {
+                    var cat = CharUnicodeInfo.GetUnicodeCategory(c);
+                    return cat != UnicodeCategory.Control && cat != UnicodeCategory.Format;
+                }).ToArray());
                 var key = new string(
-                    line.Normalize(NormalizationForm.FormKC)
+                    stripped.Normalize(NormalizationForm.FormKC)
                         .ToLowerInvariant()
                         .Where(c => c >= 'a' && c <= 'z')
                         .ToArray());
                 if (key.Contains("receiptsigningkey")) continue;
-                kept.Add("> " + line);
+                kept.Add("> " + stripped);
             }
             return string.Join("\n", kept);
         }
