@@ -68,7 +68,7 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
                 return RateLimited();
 
             var settings = await _agentCheckoutService.GetSettings(storeId);
-            if (!settings.Enabled)
+            if (!AgentCheckoutSettings.IsActive(settings))
                 return NotFound();
 
             var key = await _agentCheckoutService.GetReceiptKey(storeId);
@@ -78,11 +78,9 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
             var content = BuildLlmsTxt(npub);
             if (!string.IsNullOrWhiteSpace(settings.LlmsTxtAppend))
             {
-                var merchantContent = string.Join("\n",
-                    settings.LlmsTxtAppend.Split('\n')
-                        .Where(l => !l.TrimStart().StartsWith("Receipt signing key:", StringComparison.OrdinalIgnoreCase)));
-                if (!string.IsNullOrWhiteSpace(merchantContent))
-                    content += "\n## Merchant notes\n\n" + merchantContent.Trim() + "\n";
+                var sanitized = SanitizeMerchantText(settings.LlmsTxtAppend);
+                if (!string.IsNullOrWhiteSpace(sanitized))
+                    content += "\n## Merchant notes\n\n" + sanitized + "\n";
             }
 
             return Content(content, "text/plain; charset=utf-8");
@@ -215,17 +213,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
 
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
-            if (!settings.Enabled)
+            if (!AgentCheckoutSettings.IsActive(settings))
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
 
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
                 return RateLimited();
 
-            if (invoice.Status == InvoiceStatus.Expired || invoice.Status == InvoiceStatus.Invalid)
-                return BadRequest(new ErrorResponse("invoice-expired", "The invoice is expired or invalid."));
-
-            if (invoice.Status == InvoiceStatus.Settled)
-                return BadRequest(new ErrorResponse("invoice-already-paid", "The invoice has already been paid."));
+            if (!IsQuotable(invoice.Status))
+                return StatusCode(409, new ErrorResponse("invoice-not-awaiting-payment", "Quote is only available for invoices in New status."));
 
             if (invoice.ExpirationTime <= DateTimeOffset.UtcNow)
                 return StatusCode(409, new ErrorResponse("invoice-expired", "The invoice expiry time has passed."));
@@ -292,29 +287,10 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 {
                     entry.AbsoluteExpiration = invoice.ExpirationTime;
                     var amountMsat = (long)(accounting.Due * 100_000_000_000m);
-                    var tags = new List<NostrEventTag>
-                    {
-                        new() { TagIdentifier = "invoice", Data = new() { request.InvoiceId } },
-                        new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } },
-                        new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } },
-                        new() { TagIdentifier = "method", Data = new() { method } }
-                    };
-                    if (method == "LIGHTNING" && !string.IsNullOrEmpty(paymentUrl))
-                    {
-                        var bolt11 = paymentUrl.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)
-                            ? paymentUrl[10..]
-                            : paymentUrl;
-                        tags.Add(new() { TagIdentifier = "bolt11", Data = new() { bolt11 } });
-                        if (paymentHash != null)
-                            tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
-                    }
-                    else if (method == "BITCOIN" && !string.IsNullOrEmpty(selectedPrompt.Destination))
-                    {
-                        tags.Add(new() { TagIdentifier = "address", Data = new() { selectedPrompt.Destination } });
-                    }
-                    tags.Add(new() { TagIdentifier = "quote", Data = new() { quoteId } });
-                    tags.Add(new() { TagIdentifier = "valid_until", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
-                    tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
+                    var tags = BuildOfferTags(
+                        request.InvoiceId, amountMsat, invoice.Price, invoice.Currency,
+                        method, paymentUrl, paymentHash, selectedPrompt.Destination,
+                        quoteId, invoice.ExpirationTime.ToUnixTimeSeconds(), invoice.StoreId);
                     var evt = new NostrEvent { Kind = 1402, Content = "", Tags = tags };
                     return await evt.ComputeIdAndSignAsync(receiptKey!);
                 });
@@ -369,7 +345,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
 
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
-            if (!settings.Enabled)
+            if (!AgentCheckoutSettings.IsActive(settings))
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
 
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
@@ -443,7 +419,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
 
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
-            if (!settings.Enabled)
+            if (!AgentCheckoutSettings.IsActive(settings))
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
 
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
@@ -454,7 +430,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (store != null)
             {
                 var receiptOptions = InvoiceDataBase.ReceiptOptions.Merge(store.GetStoreBlob().ReceiptOptions, invoice.ReceiptOptions);
-                includeTxidAndPaidAt = receiptOptions.Enabled is true && receiptOptions.ShowPayments is not false;
+                includeTxidAndPaidAt = ShouldIncludePayments(invoice.Status, receiptOptions.Enabled, receiptOptions.ShowPayments);
             }
 
             var lnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
@@ -520,6 +496,9 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
 
             var offerIdsKey = $"agco_offer_ids_{request.InvoiceId}";
             _memoryCache.TryGetValue<List<string>>(offerIdsKey, out var offerIds);
+            List<string>? offerIdSnapshot = null;
+            if (offerIds != null)
+                lock (offerIds) { offerIdSnapshot = offerIds.ToList(); }
 
             var paymentStatus = invoice.Status switch
             {
@@ -531,23 +510,14 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 _ => "UNKNOWN"
             };
 
-            var tags = new List<NostrEventTag>();
-            tags.Add(new() { TagIdentifier = "d", Data = new() { request.InvoiceId } });
-            if (offerIds != null)
-                lock (offerIds) { foreach (var id in offerIds) tags.Add(new() { TagIdentifier = "e", Data = new() { id } }); }
-            tags.Add(new() { TagIdentifier = "status", Data = new() { paymentStatus } });
-            tags.Add(new() { TagIdentifier = "delivery", Data = new() { "UNKNOWN" } });
-            tags.Add(new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } });
-            tags.Add(new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } });
-            foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "method", Data = new() { m } });
-            foreach (var ph in paymentHashes) tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { ph } });
-            if (includeTxidAndPaidAt)
-                foreach (var txid in txids) tags.Add(new() { TagIdentifier = "txid", Data = new() { txid } });
-            foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "quote", Data = new() { ComputeQuoteId(request.InvoiceId, m) } });
-            tags.Add(new() { TagIdentifier = "quote_expires_at", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
-            if (includeTxidAndPaidAt && paidAt.HasValue) tags.Add(new() { TagIdentifier = "paid_at", Data = new() { paidAt.Value.ToUnixTimeSeconds().ToString() } });
-            if (paidMsat > 0 && paidMsat != amountMsat) tags.Add(new() { TagIdentifier = "paid", Data = new() { paidMsat.ToString() } });
-            tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
+            var tags = BuildReceiptTags(
+                request.InvoiceId, offerIdSnapshot, paymentStatus,
+                amountMsat, invoice.Price, invoice.Currency,
+                paidMethods, paymentHashes,
+                includeTxidAndPaidAt, txids,
+                invoice.ExpirationTime.ToUnixTimeSeconds(),
+                includeTxidAndPaidAt, paidAt?.ToUnixTimeSeconds(),
+                paidMsat, invoice.StoreId);
 
             var receiptEvt = new NostrEvent { Kind = 31402, Content = "", Tags = tags };
             var signedReceipt = await receiptEvt.ComputeIdAndSignAsync(receiptKey);
@@ -563,14 +533,17 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
 
         internal static string GetRateLimitKey(string ip)
         {
-            if (IPAddress.TryParse(ip, out var addr) &&
-                addr.AddressFamily == AddressFamily.InterNetworkV6)
+            if (!IPAddress.TryParse(ip, out var addr))
+                return ip;
+            if (addr.IsIPv4MappedToIPv6)
+                addr = addr.MapToIPv4();
+            if (addr.AddressFamily == AddressFamily.InterNetworkV6)
             {
                 var bytes = addr.GetAddressBytes();
                 for (int i = 8; i < 16; i++) bytes[i] = 0;
                 return new IPAddress(bytes) + "/64";
             }
-            return ip;
+            return addr.ToString();
         }
 
         internal static bool IsValidStoreId(string id) =>
@@ -580,6 +553,80 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
         internal static bool IsValidInvoiceId(string id) =>
             id.Length >= 10 && id.Length <= 64 &&
             id.All(c => char.IsLetterOrDigit(c) || c == '-' || c == '_');
+
+        internal static bool IsQuotable(InvoiceStatus status) => status == InvoiceStatus.New;
+
+        internal static bool ShouldIncludePayments(InvoiceStatus status, bool? receiptEnabled, bool? showPayments) =>
+            status == InvoiceStatus.Settled && receiptEnabled is true && showPayments is not false;
+
+        internal static string SanitizeMerchantText(string raw)
+        {
+            var text = raw.Length > 4000 ? raw[..4000] : raw;
+            text = text.Normalize(NormalizationForm.FormKC);
+            text = new string(text.Where(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t').ToArray());
+            text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+            var lines = text.Split('\n')
+                .Where(l => !l.Replace(" ", "").ToLowerInvariant().StartsWith("receiptsigningkey"))
+                .Select(l => "> " + l)
+                .ToList();
+            return string.Join("\n", lines).TrimEnd();
+        }
+
+        internal static List<NostrEventTag> BuildOfferTags(
+            string invoiceId, long amountMsat, decimal price, string currency,
+            string method, string? paymentUrl, string? paymentHash, string? address,
+            string quoteId, long validUntilUnix, string storeId)
+        {
+            var tags = new List<NostrEventTag>
+            {
+                new() { TagIdentifier = "invoice", Data = new() { invoiceId } },
+                new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } },
+                new() { TagIdentifier = "price", Data = new() { price.ToString(CultureInfo.InvariantCulture), currency } },
+                new() { TagIdentifier = "method", Data = new() { method } }
+            };
+            if (method == "LIGHTNING" && !string.IsNullOrEmpty(paymentUrl))
+            {
+                var bolt11 = paymentUrl.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)
+                    ? paymentUrl[10..] : paymentUrl;
+                tags.Add(new() { TagIdentifier = "bolt11", Data = new() { bolt11 } });
+                if (paymentHash != null)
+                    tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
+            }
+            else if (method == "BITCOIN" && !string.IsNullOrEmpty(address))
+                tags.Add(new() { TagIdentifier = "address", Data = new() { address } });
+            tags.Add(new() { TagIdentifier = "quote", Data = new() { quoteId } });
+            tags.Add(new() { TagIdentifier = "valid_until", Data = new() { validUntilUnix.ToString() } });
+            tags.Add(new() { TagIdentifier = "store", Data = new() { storeId } });
+            return tags;
+        }
+
+        internal static List<NostrEventTag> BuildReceiptTags(
+            string invoiceId, IReadOnlyList<string>? offerIds, string paymentStatus,
+            long amountMsat, decimal price, string currency,
+            IEnumerable<string> paidMethods, IEnumerable<string> paymentHashes,
+            bool includeTxids, IEnumerable<string> txids,
+            long quoteExpiresAtUnix, bool includePaidAt, long? paidAtUnix,
+            long paidMsat, string storeId)
+        {
+            var tags = new List<NostrEventTag>();
+            tags.Add(new() { TagIdentifier = "d", Data = new() { invoiceId } });
+            if (offerIds != null)
+                foreach (var id in offerIds) tags.Add(new() { TagIdentifier = "e", Data = new() { id } });
+            tags.Add(new() { TagIdentifier = "status", Data = new() { paymentStatus } });
+            tags.Add(new() { TagIdentifier = "delivery", Data = new() { "UNKNOWN" } });
+            tags.Add(new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } });
+            tags.Add(new() { TagIdentifier = "price", Data = new() { price.ToString(CultureInfo.InvariantCulture), currency } });
+            foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "method", Data = new() { m } });
+            foreach (var ph in paymentHashes) tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { ph } });
+            if (includeTxids)
+                foreach (var txid in txids) tags.Add(new() { TagIdentifier = "txid", Data = new() { txid } });
+            foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "quote", Data = new() { ComputeQuoteId(invoiceId, m) } });
+            tags.Add(new() { TagIdentifier = "quote_expires_at", Data = new() { quoteExpiresAtUnix.ToString() } });
+            if (includePaidAt && paidAtUnix.HasValue) tags.Add(new() { TagIdentifier = "paid_at", Data = new() { paidAtUnix.Value.ToString() } });
+            if (paidMsat > 0 && paidMsat != amountMsat) tags.Add(new() { TagIdentifier = "paid", Data = new() { paidMsat.ToString() } });
+            tags.Add(new() { TagIdentifier = "store", Data = new() { storeId } });
+            return tags;
+        }
 
         private IActionResult RateLimited()
         {
@@ -599,7 +646,7 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             return details?.PaymentHash?.ToString();
         }
 
-        private static string ComputeQuoteId(string invoiceId, string method)
+        internal static string ComputeQuoteId(string invoiceId, string method)
         {
             var input = Encoding.UTF8.GetBytes($"{invoiceId}:{method}");
             var hash = SHA256.HashData(input);
