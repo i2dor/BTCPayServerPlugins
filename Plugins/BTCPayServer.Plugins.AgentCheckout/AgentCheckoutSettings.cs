@@ -8,5 +8,6 @@ namespace BTCPayServer.Plugins.AgentCheckout
         public bool AllowOnChain { get; set; } = true;
         public int RateLimitPerMinute { get; set; } = 30;
         public string? LlmsTxtAppend { get; set; }
+        public string? ReceiptPrivateKeyHex { get; set; }
     }
 }

@@ -4,6 +4,10 @@ using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NBitcoin;
+using NBitcoin.Secp256k1;
+using NNostr.Client;
+using NNostr.Client.Protocols;
 
 namespace BTCPayServer.Plugins.AgentCheckout.Controllers
 {
@@ -23,12 +27,46 @@ namespace BTCPayServer.Plugins.AgentCheckout.Controllers
         public async Task<IActionResult> UpdateSettings(string storeId)
         {
             var settings = await _service.GetSettings(storeId);
+            if (!string.IsNullOrEmpty(settings.ReceiptPrivateKeyHex))
+            {
+                var key = NostrExtensions.ParseKey(settings.ReceiptPrivateKeyHex);
+                ViewBag.ReceiptNpub = AgentCheckoutService.GetReceiptNpub(key);
+            }
             return View(settings);
         }
 
         [HttpPost("")]
-        public async Task<IActionResult> UpdateSettings(string storeId, AgentCheckoutSettings settings)
+        public async Task<IActionResult> UpdateSettings(string storeId, AgentCheckoutSettings settings, string? importReceiptKey, string? keyAction)
         {
+            if (keyAction == "generate")
+            {
+                var newKey = ECPrivKey.Create(RandomUtils.GetBytes(32));
+                settings.ReceiptPrivateKeyHex = newKey.ToHex();
+            }
+            else if (!string.IsNullOrWhiteSpace(importReceiptKey))
+            {
+                try
+                {
+                    ECPrivKey parsed;
+                    var trimmed = importReceiptKey.Trim();
+                    if (trimmed.StartsWith("nsec"))
+                        parsed = trimmed.FromNIP19Nsec();
+                    else
+                        parsed = NostrExtensions.ParseKey(trimmed);
+                    settings.ReceiptPrivateKeyHex = parsed.ToHex();
+                }
+                catch
+                {
+                    TempData[WellKnownTempData.ErrorMessage] = "Invalid key. Provide a valid nsec or 64-character hex private key.";
+                    return RedirectToAction(nameof(UpdateSettings), new { storeId });
+                }
+            }
+            else
+            {
+                var existing = await _service.GetSettings(storeId);
+                settings.ReceiptPrivateKeyHex = existing.ReceiptPrivateKeyHex;
+            }
+
             await _service.UpdateSettings(storeId, settings);
             TempData[WellKnownTempData.SuccessMessage] = "Agent Checkout settings saved.";
             return RedirectToAction(nameof(UpdateSettings), new { storeId });

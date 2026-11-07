@@ -4,6 +4,7 @@
 @model BTCPayServer.Plugins.AgentCheckout.AgentCheckoutSettings
 @{
     ViewData.SetActivePage("AgentCheckout", "Agent Checkout", "AgentCheckout");
+    var receiptNpub = ViewBag.ReceiptNpub as string;
 }
 
 <div class="sticky-header-setup"></div>
@@ -50,6 +51,33 @@
                 <textarea asp-for="LlmsTxtAppend" class="form-control" rows="6"
                           placeholder="## Store notes&#10;&#10;Additional instructions for LLM agents visiting this store."></textarea>
                 <p class="text-muted mt-1 mb-0">Raw Markdown appended after the standard API instructions in <code>/stores/{storeId}/llms.txt</code>.</p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Receipt signing key</label>
+                @if (!string.IsNullOrEmpty(receiptNpub))
+                {
+                    <div class="input-group mb-2">
+                        <input type="text" class="form-control font-monospace" value="@receiptNpub" readonly />
+                        <button type="submit" name="keyAction" value="generate" class="btn btn-outline-secondary">Generate new key</button>
+                    </div>
+                    <p class="text-muted mt-1 mb-0">Nostr public key used to sign offers and receipts. Published in <code>llms.txt</code>.</p>
+                }
+                else
+                {
+                    <div class="mb-2">
+                        <button type="submit" name="keyAction" value="generate" class="btn btn-outline-primary">Generate key</button>
+                    </div>
+                    <p class="text-muted mt-1 mb-0">No receipt key set. Generate one above or import an existing key below.</p>
+                }
+                <div class="mt-2">
+                    <label class="form-label text-muted small">Import existing key (nsec or hex private key)</label>
+                    <div class="input-group">
+                        <input type="password" name="importReceiptKey" class="form-control font-monospace"
+                               placeholder="nsec1... or 64-character hex" autocomplete="off" />
+                        <button type="submit" class="btn btn-outline-secondary">Import</button>
+                    </div>
+                </div>
             </div>
 
         </div>
