@@ -200,6 +200,9 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (invoice is null)
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
 
+            if (invoice.Archived)
+                return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
+
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
@@ -344,6 +347,9 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (invoice is null)
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
 
+            if (invoice.Archived)
+                return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
+
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
@@ -402,6 +408,9 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (invoice is null)
                 return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
 
+            if (invoice.Archived)
+                return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
+
             var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
             if (!settings.Enabled)
                 return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
@@ -409,6 +418,8 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
                 return RateLimited();
 
+            // TODO: check invoice.ReceiptOptions (merged with store blob) and omit txid/paid_at when ShowPayments is false.
+            // Currently always included as a conservative default.
             var lnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
             var btcPmId = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
             var prompts = invoice.GetPaymentPrompts();
