@@ -356,6 +356,116 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
                 paymentHash));
         }
 
+        [HttpPost("/api/v1/agent/checkout/receipt")]
+        public async Task<IActionResult> GetReceipt([FromBody] ReceiptRequest? request)
+        {
+            if (string.IsNullOrEmpty(request?.InvoiceId))
+                return BadRequest(new ErrorResponse("invoice-id-required", "invoiceId is required."));
+
+            var ip = ClientIp;
+            if (!_agentCheckoutService.CheckGlobalRateLimit(ip))
+                return RateLimited();
+
+            var invoice = await _invoiceRepository.GetInvoice(request.InvoiceId);
+            if (invoice is null)
+                return NotFound(new ErrorResponse("invoice-not-found", "The invoice was not found."));
+
+            var settings = await _agentCheckoutService.GetSettings(invoice.StoreId);
+            if (!settings.Enabled)
+                return StatusCode(503, new ErrorResponse("agent-checkout-disabled", "Agent Checkout is not enabled for this store."));
+
+            if (!_agentCheckoutService.CheckRateLimit(invoice.StoreId, ip, settings.RateLimitPerMinute))
+                return RateLimited();
+
+            var lnPmId = PaymentTypes.LN.GetPaymentMethodId("BTC");
+            var btcPmId = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
+            var prompts = invoice.GetPaymentPrompts();
+
+            var payments = invoice.GetPayments(false).Where(p => p.Accounted).ToList();
+            var paidMethods = new HashSet<string>();
+            var txids = new HashSet<string>();
+            DateTimeOffset? paidAt = null;
+            foreach (var p in payments)
+            {
+                if (p.PaymentMethodId == lnPmId)
+                    paidMethods.Add("LIGHTNING");
+                else if (p.PaymentMethodId == btcPmId)
+                {
+                    paidMethods.Add("BITCOIN");
+                    if (_handlers.TryGetValue(btcPmId, out var btcH))
+                    {
+                        var btcData = p.GetDetails<BitcoinLikePaymentData>(btcH);
+                        if (btcData?.Outpoint?.Hash != null)
+                            txids.Add(btcData.Outpoint.Hash.ToString());
+                    }
+                }
+                if (paidAt is null || p.ReceivedTime > paidAt)
+                    paidAt = p.ReceivedTime;
+            }
+
+            PaymentPrompt? amountPrompt = null;
+            if (paidMethods.Contains("LIGHTNING") && prompts.TryGetValue(lnPmId, out var lnP))
+                amountPrompt = lnP;
+            else if (paidMethods.Contains("BITCOIN") && prompts.TryGetValue(btcPmId, out var btcP))
+                amountPrompt = btcP;
+            else if (prompts.TryGetValue(lnPmId, out var lnPDef) && lnPDef?.Activated == true)
+                amountPrompt = lnPDef;
+            else if (prompts.TryGetValue(btcPmId, out var btcPDef) && btcPDef?.Activated == true)
+                amountPrompt = btcPDef;
+
+            long amountMsat = 0;
+            long paidMsat = 0;
+            if (amountPrompt != null)
+            {
+                var acc = amountPrompt.Calculate();
+                amountMsat = (long)(acc.TotalDue * 100_000_000_000m);
+                paidMsat = (long)(acc.Paid * 100_000_000_000m);
+            }
+
+            var receiptKey = await _agentCheckoutService.GetOrCreateReceiptKey(invoice.StoreId);
+            var pubKeyHex = AgentCheckoutService.GetReceiptPubKeyHex(receiptKey);
+            var npub = AgentCheckoutService.GetReceiptNpub(receiptKey);
+
+            var offerIdsKey = $"agco_offer_ids_{request.InvoiceId}";
+            _memoryCache.TryGetValue<List<string>>(offerIdsKey, out var offerIds);
+
+            var paymentStatus = invoice.Status switch
+            {
+                InvoiceStatus.New => "PENDING",
+                InvoiceStatus.Processing => "PROCESSING",
+                InvoiceStatus.Settled => "PAID",
+                InvoiceStatus.Expired => "EXPIRED",
+                InvoiceStatus.Invalid => "INVALID",
+                _ => "UNKNOWN"
+            };
+
+            var tags = new List<NostrEventTag>();
+            tags.Add(new() { TagIdentifier = "d", Data = new() { request.InvoiceId } });
+            if (offerIds != null)
+                lock (offerIds) { foreach (var id in offerIds) tags.Add(new() { TagIdentifier = "e", Data = new() { id } }); }
+            tags.Add(new() { TagIdentifier = "status", Data = new() { paymentStatus } });
+            tags.Add(new() { TagIdentifier = "delivery", Data = new() { "UNKNOWN" } });
+            tags.Add(new() { TagIdentifier = "amount", Data = new() { amountMsat.ToString() } });
+            tags.Add(new() { TagIdentifier = "price", Data = new() { invoice.Price.ToString(CultureInfo.InvariantCulture), invoice.Currency } });
+            foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "method", Data = new() { m } });
+            var paymentHash = GetLightningPaymentHash(invoice);
+            if (paymentHash != null) tags.Add(new() { TagIdentifier = "payment_hash", Data = new() { paymentHash } });
+            foreach (var txid in txids) tags.Add(new() { TagIdentifier = "txid", Data = new() { txid } });
+            foreach (var m in paidMethods) tags.Add(new() { TagIdentifier = "quote", Data = new() { ComputeQuoteId(request.InvoiceId, m) } });
+            tags.Add(new() { TagIdentifier = "quote_expires_at", Data = new() { invoice.ExpirationTime.ToUnixTimeSeconds().ToString() } });
+            if (paidAt.HasValue) tags.Add(new() { TagIdentifier = "paid_at", Data = new() { paidAt.Value.ToUnixTimeSeconds().ToString() } });
+            if (paidMsat > 0 && paidMsat != amountMsat) tags.Add(new() { TagIdentifier = "paid", Data = new() { paidMsat.ToString() } });
+            tags.Add(new() { TagIdentifier = "store", Data = new() { invoice.StoreId } });
+
+            var receiptEvt = new NostrEvent { Kind = 31402, Content = "", Tags = tags };
+            var signedReceipt = await receiptEvt.ComputeIdAndSignAsync(receiptKey);
+
+            var receiptStr = System.Text.Json.JsonSerializer.Serialize(signedReceipt);
+            var receiptJObject = JObject.Parse(receiptStr);
+
+            return Ok(new ReceiptResponse(receiptJObject, pubKeyHex, npub));
+        }
+
         private string ClientIp =>
             HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
@@ -467,6 +577,31 @@ If PENDING or PROCESSING, wait and check again. Treat UNKNOWN as a transient sta
             AmountSats = amountSats;
             PaidAt = paidAt;
             PaymentHash = paymentHash;
+        }
+    }
+
+    public class ReceiptRequest
+    {
+        [JsonProperty("invoiceId")]
+        public string? InvoiceId { get; set; }
+    }
+
+    public class ReceiptResponse
+    {
+        [JsonProperty("receipt")]
+        public JObject Receipt { get; }
+
+        [JsonProperty("pubkey")]
+        public string PubKey { get; }
+
+        [JsonProperty("npub")]
+        public string Npub { get; }
+
+        public ReceiptResponse(JObject receipt, string pubKey, string npub)
+        {
+            Receipt = receipt;
+            PubKey = pubKey;
+            Npub = npub;
         }
     }
 
